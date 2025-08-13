@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Weather4Sports
     </title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
             --bg: #0f1724;
@@ -202,6 +203,11 @@
         #favorites-section .delete-btn { color: #ffb4b4; padding: 6px 8px; }
         
         .explain { margin-top: 10px; color: var(--muted); font-size: 13px; font-style: italic; }
+        
+        #settings-panel { display: none; margin-top: 18px; }
+        .settings-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+        .settings-row label { font-size: 14px; }
+        .settings-row input[type="range"] { flex-grow: 1; margin: 0 12px; }
 
     </style>
 </head>
@@ -256,6 +262,9 @@
                         <div class="stat">Sunset<br><strong id="sunset">--</strong></div>
                     </div>
 
+                    <div class="card" style="margin-top: 18px; padding: 12px;">
+                        <canvas id="score-breakdown-chart"></canvas>
+                   </div>
                 </div>
                 <div class="col">
                     <div class="muted">Sport</div>
@@ -304,6 +313,24 @@
                 <button class="btn primary" id="apply-coords">Apply</button>
                 <div id="status" style="margin-left:auto" class="muted">API: Open-Meteo</div>
             </div>
+            
+            <div style="text-align: center; margin-top: 18px;">
+                 <button class="btn" id="settings-btn">⚙️ Settings</button>
+            </div>
+            <div id="settings-panel" class="card">
+                <h3 style="margin-top:0;">Ideal Temperature for <span id="settings-sport-name"></span></h3>
+                <div class="settings-row">
+                    <label for="ideal-low">Low:</label>
+                    <input type="range" id="ideal-low" min="-10" max="40">
+                    <span id="ideal-low-value">--</span>
+                </div>
+                <div class="settings-row">
+                    <label for="ideal-high">High:</label>
+                    <input type="range" id="ideal-high" min="-10" max="40">
+                    <span id="ideal-high-value">--</span>
+                </div>
+                 <button class="btn primary" id="reset-temps-btn" style="width:100%; margin-top: 12px;">Reset to Default</button>
+            </div>
         </div>
     </div>
 
@@ -316,6 +343,7 @@
         
         let units = unitsSelect.value;
         let lastData = null;
+        let scoreBreakdownChart = null;
 
         const sportsConfig = {
             basketball: { weights: { temp: 0.4, wind: 0.2, humidity: 0.1, uv: 0.2, visibility: 0.1 }, idealTemp: [15, 28], precipPenaltyFactor: 0.25 },
@@ -329,6 +357,7 @@
 
         unitsSelect.addEventListener('change', () => {
             units = unitsSelect.value;
+            updateSettingsPanel(); // Update settings panel display on unit change
             if (lastData) render(lastData);
         });
 
@@ -336,6 +365,7 @@
             document.querySelectorAll('.sport').forEach(s => s.classList.remove('active'));
             el.classList.add('active');
             selectedSport = el.dataset.sport;
+            updateSettingsPanel();
             if (lastData) render(lastData);
         }));
 
@@ -437,9 +467,9 @@
         }
         
         function calculatePlayability(hourlyData, config, hourIndex) {
-             if (hourIndex === undefined || hourIndex < 0 || !hourlyData) return 0;
+             if (hourIndex === undefined || hourIndex < 0 || !hourlyData) return { finalScore: 0, componentScores: {} };
              const requiredKeys = ['temperature_2m', 'precipitation', 'windspeed_10m', 'relativehumidity_2m', 'cloudcover', 'uv_index', 'visibility', 'weathercode'];
-             if (requiredKeys.some(key => !hourlyData[key] || hourlyData[key].length <= hourIndex)) return 0;
+             if (requiredKeys.some(key => !hourlyData[key] || hourlyData[key].length <= hourIndex)) return { finalScore: 0, componentScores: {} };
 
              const tempC = hourlyData.temperature_2m[hourIndex];
              const precip_mm = hourlyData.precipitation[hourIndex];
@@ -450,7 +480,7 @@
              const visibility_m = hourlyData.visibility[hourIndex];
              const weatherCode = hourlyData.weathercode[hourIndex];
 
-             if ([tempC, precip_mm, wind_kmh, hum, clouds, uv, visibility_m, weatherCode].some(v => v === undefined || v === null)) return 0;
+             if ([tempC, precip_mm, wind_kmh, hum, clouds, uv, visibility_m, weatherCode].some(v => v === undefined || v === null)) return { finalScore: 0, componentScores: {} };
              
              const dealBreakerCodes = [ 56, 57, 66, 67, 71, 73, 75, 77, 85, 86, 96, 99 ]; 
              const precipPenaltyFactor = config.precipPenaltyFactor || 2.0;
@@ -461,11 +491,12 @@
                 precipMultiplier = 0.3;
              }
 
-             if (precipMultiplier === 0) return 0;
+             if (precipMultiplier === 0) return { finalScore: 0, componentScores: {} };
 
+             const idealTemp = getIdealTempsForSport(selectedSport);
              let tempScore = 0;
-             if (tempC < config.idealTemp[0]) tempScore = Math.max(0, 1 - (config.idealTemp[0] - tempC) / 15);
-             else if (tempC > config.idealTemp[1]) tempScore = Math.max(0, 1 - (tempC - config.idealTemp[1]) / 15);
+             if (tempC < idealTemp[0]) tempScore = Math.max(0, 1 - (idealTemp[0] - tempC) / 15);
+             else if (tempC > idealTemp[1]) tempScore = Math.max(0, 1 - (tempC - idealTemp[1]) / 15);
              else tempScore = 1;
 
              let windScore = wind_kmh > 35 ? 0 : 1 - wind_kmh / 35;
@@ -474,6 +505,8 @@
              let uvScore = uv < 3 ? 1 : (uv > 11 ? 0 : 1 - ((uv - 3) / 8));
              const vis_km = visibility_m / 1000;
              let visibilityScore = vis_km > 10 ? 1 : (vis_km < 1 ? 0 : (vis_km - 1) / 9);
+             
+             const componentScores = { 'Temp': tempScore * 100, 'Wind': windScore * 100, 'Humidity': humScore * 100, 'Clouds': cloudsScore * 100, 'UV Index': uvScore * 100, 'Visibility': visibilityScore * 100 };
              
              let weightedSum = 0;
              let totalWeight = 0;
@@ -485,7 +518,6 @@
                 if (factor === 'clouds') score = cloudsScore;
                 if (factor === 'uv') score = uvScore;
                 if (factor === 'visibility') score = visibilityScore;
-                
                 weightedSum += score * config.weights[factor];
                 totalWeight += config.weights[factor];
              }
@@ -493,17 +525,13 @@
              const baseScore = totalWeight > 0 ? (weightedSum / totalWeight) : 1;
              const finalScore = baseScore * precipMultiplier;
              
-             return Math.round(finalScore * 100);
+             return { finalScore: Math.round(finalScore * 100), componentScores };
         }
 
-        // --- NEW: Generates the text reason for the current score ---
         function generateReasonText(hourlyData, config, index) {
-            const score = calculatePlayability(hourlyData, config, index);
-
-            if (score >= 80) {
-                return `✅ Conditions are ideal for ${selectedSport}.`;
-            }
-
+            const { finalScore } = calculatePlayability(hourlyData, config, index);
+            if (finalScore >= 80) return `✅ Conditions are ideal for ${selectedSport}.`;
+            
             const tempC = hourlyData.temperature_2m[index];
             const precip_mm = hourlyData.precipitation[index];
             const wind_kmh = hourlyData.windspeed_10m[index];
@@ -512,10 +540,11 @@
             const visibility_m = hourlyData.visibility[index];
             const weatherCode = hourlyData.weathercode[index];
             const vis_km = visibility_m / 1000;
+            const idealTemp = getIdealTempsForSport(selectedSport);
             
             const reasons = [];
-            if (tempC > config.idealTemp[1]) reasons.push('high temperature');
-            if (tempC < config.idealTemp[0]) reasons.push('low temperature');
+            if (tempC > idealTemp[1]) reasons.push('high temperature');
+            if (tempC < idealTemp[0]) reasons.push('low temperature');
             const isSnowing = [71, 73, 75, 77, 85, 86].includes(weatherCode);
             if (precip_mm > 0.1 && isSnowing) reasons.push('snow');
             else if (precip_mm > 0.1) reasons.push('rain');
@@ -524,40 +553,26 @@
             if (uv > 7) reasons.push('high UV index');
             if (vis_km < 2) reasons.push('poor visibility');
 
-            if (reasons.length === 0 && score < 80) {
-                 return `👍 Conditions are generally good for ${selectedSport}.`;
-            }
-            
-            const prefix = score >= 50 ? 'Fair conditions:' : 'Poor conditions due to:';
+            if (reasons.length === 0 && finalScore < 80) return `👍 Conditions are generally good for ${selectedSport}.`;
+            const prefix = finalScore >= 50 ? 'Fair conditions:' : 'Poor conditions due to:';
             return `${prefix} ${reasons.join(', ')}.`;
         }
 
-
         function findPlayWindows(hourlyData, config, startIndex) {
             if (!hourlyData.time || !hourlyData.time[startIndex]) return 'Not enough data.';
-            
             const todayStr = hourlyData.time[startIndex].split('T')[0];
             const goodHours = [];
-
             for (let i = startIndex; i < hourlyData.time.length; i++) {
                 const date = new Date(hourlyData.time[i]);
                 const hour = date.getHours();
                 const currentDayStr = hourlyData.time[i].split('T')[0];
-
                 if (currentDayStr !== todayStr) break;
-
                 if (hour >= 6 && hour <= 21) {
-                    const score = calculatePlayability(hourlyData, config, i);
-                    if (score >= 80) {
-                        goodHours.push(hour);
-                    }
+                    const { finalScore } = calculatePlayability(hourlyData, config, i);
+                    if (finalScore >= 80) goodHours.push(hour);
                 }
             }
-
-            if (goodHours.length === 0) {
-                return 'No ideal windows left today.';
-            }
-
+            if (goodHours.length === 0) return 'No ideal windows left today.';
             const windows = [];
             let currentWindow = [];
             for (let i = 0; i < goodHours.length; i++) {
@@ -568,16 +583,14 @@
                 currentWindow.push(goodHours[i]);
             }
             if (currentWindow.length > 0) windows.push(currentWindow);
-
             return windows.map(window => {
                 const formatOptions = { hour: 'numeric', hour12: true };
                 const startTime = new Date();
                 startTime.setHours(window[0], 0, 0);
-
                 if (window.length > 1) {
                     const endTime = new Date();
                     endTime.setHours(window[window.length - 1] + 1, 0, 0);
-                    return `${startTime.toLocaleTimeString([], formatOptions).replace(/\s/g, '')} - ${endTime.toLocaleTimeString([], formatOptions).replace(/\s/g, '')}`;
+                    return `${startTime.toLocaleTimeString([], formatOptions).replace(/\s/g, '')}-${endTime.toLocaleTimeString([], formatOptions).replace(/\s/g, '')}`;
                 } else {
                     return startTime.toLocaleTimeString([], formatOptions).replace(/\s/g, '');
                 }
@@ -586,12 +599,9 @@
 
         function render(payload) {
             const { data, lat, lon, name } = payload;
-            
-            if (!data || !data.current_weather || !data.hourly || !data.hourly.time || data.hourly.time.length === 0) {
-                $('status').textContent = 'Incomplete weather data received.';
-                return;
+            if (!data || !data.current_weather || !data.hourly || !data.hourly.time || !data.hourly.time.length === 0) {
+                $('status').textContent = 'Incomplete weather data received.'; return;
             }
-            
             const cw = data.current_weather;
             const hourly = data.hourly;
             const daily = data.daily;
@@ -637,7 +647,9 @@
             $('sunset').textContent = sunsetTime;
             
             const config = sportsConfig[selectedSport];
-            const finalScore = calculatePlayability(hourly, config, idx);
+            const playability = calculatePlayability(hourly, config, idx);
+            const finalScore = playability.finalScore;
+
             scoreEl.textContent = `Score: ${finalScore}/100`;
             $('reason').textContent = generateReasonText(hourly, config, idx);
 
@@ -651,36 +663,26 @@
             updateFavoriteButtonState();
             renderHourlyForecast(hourly, config, idx);
             renderForecast(data, config);
+            renderScoreChart(playability.componentScores);
         }
 
-        function mapWeatherCodeToText(code) {
-            const map = { 0: 'Clear sky', 1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast', 45: 'Fog', 48: 'Depositing rime fog', 51: 'Light drizzle', 53: 'Moderate drizzle', 55: 'Dense drizzle', 56: 'Light freezing drizzle', 57: 'Dense freezing drizzle', 61: 'Slight rain', 63: 'Moderate rain', 65: 'Heavy rain', 66: 'Light freezing rain', 67: 'Heavy freezing rain', 71: 'Slight snow fall', 73: 'Moderate snow fall', 75: 'Heavy snow fall', 77: 'Snow grains', 80: 'Slight rain showers', 81: 'Moderate rain showers', 82: 'Violent rain showers', 85: 'Slight snow showers', 86: 'Heavy snow showers', 95: 'Thunderstorm', 96: 'Thunderstorm with slight hail', 99: 'Thunderstorm with heavy hail' };
-            return map[code] || 'Unknown';
-        }
-        
-        function getIconForWeatherCode(code) {
-            if ([0, 1].includes(code)) return '☀️'; if ([2].includes(code)) return '⛅️'; if ([3].includes(code)) return '☁️'; if ([45, 48].includes(code)) return '🌫️'; if ([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82].includes(code)) return '🌧️'; if ([71, 73, 75, 77, 85, 86].includes(code)) return '❄️'; if ([95, 96, 99].includes(code)) return '⛈️'; return '❓';
-        }
-        
+        function mapWeatherCodeToText(code) { const map = { 0: 'Clear sky', 1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast', 45: 'Fog', 48: 'Depositing rime fog', 51: 'Light drizzle', 53: 'Moderate drizzle', 55: 'Dense drizzle', 56: 'Light freezing drizzle', 57: 'Dense freezing drizzle', 61: 'Slight rain', 63: 'Moderate rain', 65: 'Heavy rain', 66: 'Light freezing rain', 67: 'Heavy freezing rain', 71: 'Slight snow fall', 73: 'Moderate snow fall', 75: 'Heavy snow fall', 77: 'Snow grains', 80: 'Slight rain showers', 81: 'Moderate rain showers', 82: 'Violent rain showers', 85: 'Slight snow showers', 86: 'Heavy snow showers', 95: 'Thunderstorm', 96: 'Thunderstorm with slight hail', 99: 'Thunderstorm with heavy hail' }; return map[code] || 'Unknown'; }
+        function getIconForWeatherCode(code) { if ([0, 1].includes(code)) return '☀️'; if ([2].includes(code)) return '⛅️'; if ([3].includes(code)) return '☁️'; if ([45, 48].includes(code)) return '🌫️'; if ([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82].includes(code)) return '🌧️'; if ([71, 73, 75, 77, 85, 86].includes(code)) return '❄️'; if ([95, 96, 99].includes(code)) return '⛈️'; return '❓'; }
         function cToF(c) { return c * 9 / 5 + 32 }
         function mpsToMph(mps) { return mps * 2.23694 }
 
         function renderRainAlert(hourly, currentIndex) {
-            const alertDiv = $('rain-alert');
+            const alertDiv = $('rain-alert'); if (!hourly.precipitation || hourly.precipitation.length <= currentIndex + 1) { alertDiv.style.display = 'none'; return; }
             const nextHourPrecip = hourly.precipitation[currentIndex + 1];
             if (nextHourPrecip > 0.1) {
                 const time = new Date(hourly.time[currentIndex + 1]).toLocaleTimeString([], { hour: 'numeric', minute:'2-digit' });
                 alertDiv.textContent = `💧 Light rain expected to start around ${time}.`;
                 alertDiv.style.display = 'block';
-            } else {
-                alertDiv.style.display = 'none';
-            }
+            } else { alertDiv.style.display = 'none'; }
         }
         
         function renderHourlyForecast(hourlyData, config, startIndex) {
-            const container = $('hourly-content');
-            let html = '';
-            const hoursToConsider = Math.min(startIndex + 24, hourlyData.time.length);
+            const container = $('hourly-content'); let html = ''; const hoursToConsider = Math.min(startIndex + 24, hourlyData.time.length);
             for (let i = startIndex; i < hoursToConsider; i++) {
                 const date = new Date(hourlyData.time[i]);
                 const timeString = (i === startIndex) ? "Now" : date.toLocaleTimeString([], { hour: 'numeric' }).replace(/\s/g, '');
@@ -688,137 +690,59 @@
                 let tempDisplay = (units === 'imperial') ? Math.round(cToF(tempC)) : Math.round(tempC);
                 const tempUnit = (units === 'imperial') ? '°F' : '°C';
                 const icon = getIconForWeatherCode(hourlyData.weathercode[i]);
-                const score = calculatePlayability(hourlyData, config, i);
-                let scoreColor = '#ef4444'; if (score >= 80) scoreColor = '#22c55e'; else if (score >= 50) scoreColor = '#eab308';
-                html += `<div class="hourly-item"><div>${timeString}</div><div class="hourly-icon">${icon}</div><div>${tempDisplay}${tempUnit}</div><div class="hourly-score" style="background-color:${scoreColor}; color: white;">${score}</div></div>`;
+                const { finalScore } = calculatePlayability(hourlyData, config, i);
+                let scoreColor = '#ef4444'; if (finalScore >= 80) scoreColor = '#22c55e'; else if (finalScore >= 50) scoreColor = '#eab308';
+                html += `<div class="hourly-item"><div>${timeString}</div><div class="hourly-icon">${icon}</div><div>${tempDisplay}${tempUnit}</div><div class="hourly-score" style="background-color:${scoreColor}; color: white;">${finalScore}</div></div>`;
             }
             container.innerHTML = html;
+        }
+
+        function renderScoreChart(componentScores) {
+            const ctx = $('score-breakdown-chart').getContext('2d'); if (scoreBreakdownChart) { scoreBreakdownChart.destroy(); }
+            const config = sportsConfig[selectedSport]; const labels = Object.keys(config.weights); const data = labels.map(label => componentScores[label.charAt(0).toUpperCase() + label.slice(1)] || 0);
+            scoreBreakdownChart = new Chart(ctx, { type: 'radar', data: { labels: labels.map(l => l.charAt(0).toUpperCase() + l.slice(1)), datasets: [{ label: 'Component Score', data: data, fill: true, backgroundColor: 'rgba(79, 70, 229, 0.2)', borderColor: 'rgba(79, 70, 229, 1)', pointBackgroundColor: 'rgba(79, 70, 229, 1)', pointBorderColor: '#fff', pointHoverBackgroundColor: '#fff', pointHoverBorderColor: 'rgba(79, 70, 229, 1)' }] }, options: { maintainAspectRatio: true, plugins: { legend: { display: false } }, scales: { r: { angleLines: { color: 'rgba(255, 255, 255, 0.1)' }, grid: { color: 'rgba(255, 255, 255, 0.1)' }, pointLabels: { color: 'rgba(255, 255, 255, 0.7)', font: { size: 11 } }, ticks: { color: 'rgba(255, 255, 255, 0.7)', backdropColor: 'rgba(0, 0, 0, 0.5)', stepSize: 25 }, min: 0, max: 100 } } } });
         }
 
         function getFavorites() { return JSON.parse(localStorage.getItem('weather_favorites')) || []; }
         function saveFavorites(favorites) { localStorage.setItem('weather_favorites', JSON.stringify(favorites)); }
-        
-        function isCurrentLocationFavorite() {
-            if (!lastData || !lastData.name) return false;
-            const favorites = getFavorites();
-            return favorites.some(fav => fav.lat === lastData.lat && fav.lon === lastData.lon);
-        }
-
-        function saveCurrentFavorite() {
-            if (!lastData || !lastData.name) return;
-            const favorites = getFavorites();
-            if (!isCurrentLocationFavorite()) {
-                favorites.push({ name: lastData.name, lat: lastData.lat, lon: lastData.lon });
-                saveFavorites(favorites);
-                renderFavorites();
-                updateFavoriteButtonState();
-            }
-        }
-        
-        function removeCurrentFavorite() {
-            if (!lastData) return;
-            let favorites = getFavorites();
-            favorites = favorites.filter(fav => !(fav.lat === lastData.lat && fav.lon === lastData.lon));
-            saveFavorites(favorites);
-            renderFavorites();
-            updateFavoriteButtonState();
-        }
-
-        function deleteFavorite(index) {
-            let favorites = getFavorites();
-            favorites.splice(index, 1);
-            saveFavorites(favorites);
-            renderFavorites();
-            updateFavoriteButtonState();
-        }
+        function isCurrentLocationFavorite() { if (!lastData || !lastData.name) return false; const favorites = getFavorites(); return favorites.some(fav => fav.lat === lastData.lat && fav.lon === lastData.lon); }
+        function saveCurrentFavorite() { if (!lastData || !lastData.name) return; const favorites = getFavorites(); if (!isCurrentLocationFavorite()) { favorites.push({ name: lastData.name, lat: lastData.lat, lon: lastData.lon }); saveFavorites(favorites); renderFavorites(); updateFavoriteButtonState(); } }
+        function removeCurrentFavorite() { if (!lastData) return; let favorites = getFavorites(); favorites = favorites.filter(fav => !(fav.lat === lastData.lat && fav.lon === lastData.lon)); saveFavorites(favorites); renderFavorites(); updateFavoriteButtonState(); }
+        function deleteFavorite(index) { let favorites = getFavorites(); favorites.splice(index, 1); saveFavorites(favorites); renderFavorites(); updateFavoriteButtonState(); }
         
         function updateFavoriteButtonState() {
-            const btn = $('save-fav-btn');
-            if (!lastData || !lastData.name) {
-                btn.style.display = 'none';
-                return;
-            }
+            const btn = $('save-fav-btn'); if (!lastData || !lastData.name) { btn.style.display = 'none'; return; }
             btn.style.display = 'inline-block';
-
-            if (isCurrentLocationFavorite()) {
-                btn.textContent = '★';
-                btn.title = 'Remove from favorites';
-                btn.classList.add('is-favorite');
-                btn.onclick = removeCurrentFavorite;
-            } else {
-                btn.textContent = '☆';
-                btn.title = 'Save to favorites';
-                btn.classList.remove('is-favorite');
-                btn.onclick = saveCurrentFavorite;
-            }
+            if (isCurrentLocationFavorite()) { btn.textContent = '★'; btn.title = 'Remove from favorites'; btn.classList.add('is-favorite'); btn.onclick = removeCurrentFavorite; } 
+            else { btn.textContent = '☆'; btn.title = 'Save to favorites'; btn.classList.remove('is-favorite'); btn.onclick = saveCurrentFavorite; }
         }
         
         function renderFavorites() {
-            const favorites = getFavorites();
-            const container = $('favorites-section');
-            if (favorites.length === 0) {
-                container.innerHTML = '';
-                container.style.display = 'none';
-                return;
-            }
-            container.style.display = 'block';
-            let html = `<h2 style="margin-top:0; margin-bottom: 12px;">Favorites</h2><div class="sport-list">`;
-            favorites.forEach((fav, index) => {
-                html += `<div><button class="btn" data-index="${index}">${fav.name}</button><button class="btn delete-btn" data-index="${index}">×</button></div>`;
-            });
-            html += `</div>`;
-            container.innerHTML = html;
+            const favorites = getFavorites(); const container = $('favorites-section'); if (favorites.length === 0) { container.innerHTML = ''; container.style.display = 'none'; return; }
+            container.style.display = 'block'; let html = `<h2 style="margin-top:0; margin-bottom: 12px;">Favorites</h2><div class="sport-list">`;
+            favorites.forEach((fav, index) => { html += `<div><button class="btn" data-index="${index}">${fav.name}</button><button class="btn delete-btn" data-index="${index}">×</button></div>`; });
+            html += `</div>`; container.innerHTML = html;
             container.querySelectorAll('.btn').forEach(btn => {
                 const index = btn.dataset.index;
-                if (btn.classList.contains('delete-btn')) {
-                    btn.addEventListener('click', () => deleteFavorite(index));
-                } else {
-                    btn.addEventListener('click', () => {
-                        const fav = getFavorites()[index];
-                        if (fav) fetchWeather(fav.lat, fav.lon, fav.name);
-                    });
-                }
+                if (btn.classList.contains('delete-btn')) { btn.addEventListener('click', () => deleteFavorite(index)); } 
+                else { btn.addEventListener('click', () => { const fav = getFavorites()[index]; if (fav) fetchWeather(fav.lat, fav.lon, fav.name); }); }
             });
         }
 
         function renderForecast(data, config) {
-            const hourly = data.hourly || {};
-            const times = hourly.time || [];
-            if (!times.length) { forecastContent.textContent = 'Forecast data not available.'; return; }
-            const dayGroups = {};
-            times.forEach((t, i) => { const day = t.split('T')[0]; if (!dayGroups[day]) dayGroups[day] = []; dayGroups[day].push(i); });
-            const tomorrow = new Date();
-            tomorrow.setDate(tomorrow.getDate() + 1);
-            const pad = n => String(n).padStart(2, '0');
-            const tomorrowStr = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}`;
-            const days = Object.keys(dayGroups).filter(d => d >= tomorrowStr).slice(0, 3);
+            const hourly = data.hourly || {}; const times = hourly.time || []; if (!times.length) { forecastContent.textContent = 'Forecast data not available.'; return; }
+            const dayGroups = {}; times.forEach((t, i) => { const day = t.split('T')[0]; if (!dayGroups[day]) dayGroups[day] = []; dayGroups[day].push(i); });
+            const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1); const pad = n => String(n).padStart(2, '0'); const tomorrowStr = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}`; const days = Object.keys(dayGroups).filter(d => d >= tomorrowStr).slice(0, 3);
             if (days.length === 0) { forecastContent.innerHTML = 'Forecast for the next 3 days is not available.'; return; }
             let html = '';
             days.forEach(day => {
-                const dayIndices = dayGroups[day];
-                if (!dayIndices || dayIndices.length === 0) return;
-                
-                const viableIndices = dayIndices.filter(i => {
-                    const hour = new Date(times[i]).getHours();
-                    return hour >= 6 && hour <= 21;
-                });
-
-                let finalScore = 0;
-                if (viableIndices.length > 0) {
-                    const hourlyScores = viableIndices.map(i => calculatePlayability(hourly, config, i));
-                    finalScore = Math.round(Math.max(...hourlyScores));
-                }
-                
-                const dayTempsC = dayIndices.map(i => hourly.temperature_2m[i]).filter(t => t !== null && t !== undefined);
-                if (dayTempsC.length === 0) return;
-
-                const lowTempC = Math.min(...dayTempsC);
-                const highTempC = Math.max(...dayTempsC);
-                
+                const dayIndices = dayGroups[day]; if (!dayIndices || dayIndices.length === 0) return;
+                const viableIndices = dayIndices.filter(i => { const hour = new Date(times[i]).getHours(); return hour >= 6 && hour <= 21; });
+                let finalScore = 0; if (viableIndices.length > 0) { const hourlyScores = viableIndices.map(i => calculatePlayability(hourly, config, i).finalScore); finalScore = Math.round(Math.max(...hourlyScores)); }
+                const dayTempsC = dayIndices.map(i => hourly.temperature_2m[i]).filter(t => t !== null && t !== undefined); if (dayTempsC.length === 0) return;
+                const lowTempC = Math.min(...dayTempsC); const highTempC = Math.max(...dayTempsC);
                 let noonIndex = dayIndices.find(i => times[i].endsWith('12:00')) ?? dayIndices[Math.floor(dayIndices.length / 2)];
-                const precip_mm = hourly.precipitation?.[noonIndex] ?? 0;
-                const wind_kmh = hourly.windspeed_10m?.[noonIndex] ?? 0;
-                const uv = hourly.uv_index?.[noonIndex];
+                const precip_mm = hourly.precipitation?.[noonIndex] ?? 0; const wind_kmh = hourly.windspeed_10m?.[noonIndex] ?? 0; const uv = hourly.uv_index?.[noonIndex];
                 let lowTempDisplay, highTempDisplay, tempUnit, windDisplay, windUnit, precipDisplay, precipUnit;
                 if (units === 'imperial') {
                     lowTempDisplay = Math.round(cToF(lowTempC)); highTempDisplay = Math.round(cToF(highTempC)); tempUnit = '°F';
@@ -829,19 +753,103 @@
                     windDisplay = Math.round(wind_kmh); windUnit = 'km/h';
                     precipDisplay = precip_mm.toFixed(1); precipUnit = 'mm';
                 }
-                const dateObj = new Date(day + 'T12:00:00');
-                const dayStr = dateObj.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-                let badgeText = '', badgeColor = '';
-                if (finalScore >= 80) { badgeText = "Good"; badgeColor = "#22c55e"; }
-                else if (finalScore >= 50) { badgeText = "Fair"; badgeColor = "#eab308"; }
-                else { badgeText = "Bad"; badgeColor = "#ef4444"; }
+                const dateObj = new Date(day + 'T12:00:00'); const dayStr = dateObj.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+                let badgeText = '', badgeColor = ''; if (finalScore >= 80) { badgeText = "Good"; badgeColor = "#22c55e"; } else if (finalScore >= 50) { badgeText = "Fair"; badgeColor = "#eab308"; } else { badgeText = "Bad"; badgeColor = "#ef4444"; }
                 html += `<div class="forecast-day"><strong>${dayStr}</strong> - Score: ${finalScore}/100 <span style="background-color:${badgeColor};color:#fff;padding:2px 6px;border-radius:12px;margin-left:8px;">${badgeText}</span><div style="font-size:12px;color:#bbb;margin-top:4px;">Temp: ${highTempDisplay}/${lowTempDisplay}${tempUnit} &bull; Precip: ${precipDisplay} ${precipUnit} &bull; Wind: ${windDisplay} ${windUnit} &bull; UV: ${uv !== null && uv !== undefined ? uv.toFixed(1) : '--'}</div></div>`;
             });
             forecastContent.innerHTML = html;
         }
 
+        // --- NEW: Settings Panel Logic ---
+        const settingsBtn = $('settings-btn');
+        const settingsPanel = $('settings-panel');
+        const idealLowSlider = $('ideal-low');
+        const idealHighSlider = $('ideal-high');
+        const idealLowValue = $('ideal-low-value');
+        const idealHighValue = $('ideal-high-value');
+        const resetTempsBtn = $('reset-temps-btn');
+        
+        function getIdealTempsForSport(sport) {
+            const prefs = JSON.parse(localStorage.getItem('temp_prefs')) || {};
+            return prefs[sport] || sportsConfig[sport].idealTemp;
+        }
+        
+        function updateSettingsPanel() {
+            $('settings-sport-name').textContent = selectedSport.charAt(0).toUpperCase() + selectedSport.slice(1);
+            const idealTemp = getIdealTempsForSport(selectedSport);
+            const isImperial = units === 'imperial';
+            
+            const min = isImperial ? Math.round(cToF(-10)) : -10;
+            const max = isImperial ? Math.round(cToF(40)) : 40;
+            idealLowSlider.min = idealHighSlider.min = min;
+            idealLowSlider.max = idealHighSlider.max = max;
+
+            let low = isImperial ? Math.round(cToF(idealTemp[0])) : idealTemp[0];
+            let high = isImperial ? Math.round(cToF(idealTemp[1])) : idealTemp[1];
+
+            idealLowSlider.value = low;
+            idealHighSlider.value = high;
+            idealLowValue.textContent = `${low}°${isImperial ? 'F' : 'C'}`;
+            idealHighValue.textContent = `${high}°${isImperial ? 'F' : 'C'}`;
+        }
+        
+        idealLowSlider.addEventListener('input', (e) => {
+            const low = parseInt(e.target.value);
+            const high = parseInt(idealHighSlider.value);
+            if (low >= high) {
+                e.target.value = high - 1;
+                return;
+            }
+            idealLowValue.textContent = `${low}°${units === 'imperial' ? 'F' : 'C'}`;
+        });
+
+        idealHighSlider.addEventListener('input', (e) => {
+            const high = parseInt(e.target.value);
+            const low = parseInt(idealLowSlider.value);
+            if (high <= low) {
+                e.target.value = low + 1;
+                return;
+            }
+            idealHighValue.textContent = `${high}°${units === 'imperial' ? 'F' : 'C'}`;
+        });
+        
+        function saveTempPrefs() {
+            const prefs = JSON.parse(localStorage.getItem('temp_prefs')) || {};
+            let low = parseInt(idealLowSlider.value);
+            let high = parseInt(idealHighSlider.value);
+            
+            if(units === 'imperial') {
+                low = (low - 32) * 5 / 9;
+                high = (high - 32) * 5 / 9;
+            }
+            
+            prefs[selectedSport] = [Math.round(low), Math.round(high)];
+            localStorage.setItem('temp_prefs', JSON.stringify(prefs));
+            if (lastData) render(lastData);
+        }
+
+        idealLowSlider.addEventListener('change', saveTempPrefs);
+        idealHighSlider.addEventListener('change', saveTempPrefs);
+
+        settingsBtn.addEventListener('click', () => {
+            const panel = $('settings-panel');
+            const isHidden = panel.style.display === 'none' || panel.style.display === '';
+            panel.style.display = isHidden ? 'block' : 'none';
+            if (isHidden) updateSettingsPanel();
+        });
+        
+        resetTempsBtn.addEventListener('click', () => {
+            const prefs = JSON.parse(localStorage.getItem('temp_prefs')) || {};
+            delete prefs[selectedSport];
+            localStorage.setItem('temp_prefs', JSON.stringify(prefs));
+            updateSettingsPanel();
+            if (lastData) render(lastData);
+        });
+
+        // --- Initial Load ---
         getLocationAndFetch();
         renderFavorites();
+        updateSettingsPanel();
     </script>
 </body>
 
