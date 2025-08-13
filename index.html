@@ -193,6 +193,50 @@
             padding: 10px;
             margin-bottom: 8px;
         }
+
+        /* --- NEW: Styles for Hourly Forecast --- */
+        #hourly-scroll-container {
+            overflow-x: auto;
+            white-space: nowrap;
+            padding-bottom: 12px;
+        }
+        #hourly-content {
+            display: flex;
+            gap: 12px;
+        }
+        .hourly-item {
+            flex-shrink: 0;
+            width: 75px;
+            padding: 12px 8px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.03);
+            text-align: center;
+            font-size: 13px;
+        }
+        .hourly-icon {
+            font-size: 24px;
+            margin: 4px 0;
+        }
+        .hourly-score {
+            font-size: 12px;
+            padding: 2px 6px;
+            border-radius: 999px;
+            margin-top: 4px;
+            font-weight: 500;
+        }
+
+        #hourly-scroll-container::-webkit-scrollbar {
+            height: 6px;
+        }
+        #hourly-scroll-container::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 3px;
+        }
+        #hourly-scroll-container::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 3px;
+        }
+
     </style>
 </head>
 
@@ -267,6 +311,14 @@
                 </div>
             </div>
 
+            <div id="hourly-forecast-section" class="card" style="padding-top: 12px;">
+                <h2 style="margin-top:0; margin-bottom: 12px;">Hourly Forecast</h2>
+                <div id="hourly-scroll-container">
+                    <div id="hourly-content">
+                        </div>
+                </div>
+            </div>
+
             <div id="forecast" class="card" style="margin-top: 24px;">
                 <h2>3-Day Playability Forecast</h2>
                 <div id="forecast-content">Loading forecast...</div>
@@ -294,11 +346,11 @@
         let lastData = null;
 
         const sportsConfig = {
-            basketball: { weights: { temp: 0.35, precip: 0.35, wind: 0.15, humidity: 0.05, clouds: 0.0, uv: 0.1, visibility: 0.0 }, idealTemp: [15, 28] },
-            soccer:     { weights: { temp: 0.25, precip: 0.3, wind: 0.15, humidity: 0.05, clouds: 0.05, uv: 0.1, visibility: 0.1 }, idealTemp: [10, 25] },
-            tennis:     { weights: { temp: 0.25, precip: 0.3, wind: 0.2, humidity: 0.05, clouds: 0.0, uv: 0.1, visibility: 0.1 }, idealTemp: [12, 30] },
-            baseball:   { weights: { temp: 0.20, precip: 0.3, wind: 0.15, humidity: 0.05, clouds: 0.05, uv: 0.1, visibility: 0.15 }, idealTemp: [12, 32] },
-            running:    { weights: { temp: 0.30, precip: 0.1, wind: 0.15, humidity: 0.15, clouds: 0.05, uv: 0.2, visibility: 0.05 }, idealTemp: [8, 20] }
+            basketball: { weights: { temp: 0.4, wind: 0.2, humidity: 0.1, uv: 0.2, visibility: 0.1 }, idealTemp: [15, 28], precipPenaltyFactor: 0.25 },
+            soccer:     { weights: { temp: 0.3, wind: 0.2, humidity: 0.1, clouds: 0.1, uv: 0.15, visibility: 0.15 }, idealTemp: [10, 25], precipPenaltyFactor: 1.5 },
+            tennis:     { weights: { temp: 0.3, wind: 0.3, humidity: 0.1, uv: 0.15, visibility: 0.15 }, idealTemp: [12, 30], precipPenaltyFactor: 0.25 },
+            baseball:   { weights: { temp: 0.3, wind: 0.2, humidity: 0.1, clouds: 0.1, uv: 0.1, visibility: 0.2 }, idealTemp: [12, 32], precipPenaltyFactor: 0.5 },
+            running:    { weights: { temp: 0.4, wind: 0.2, humidity: 0.2, uv: 0.2 }, idealTemp: [8, 20], precipPenaltyFactor: 2.5 }
         };
 
         let selectedSport = 'basketball';
@@ -423,21 +475,48 @@
 
              if ([tempC, precip_mm, wind_kmh, hum, clouds, uv, visibility_m, weatherCode].some(v => v === undefined || v === null)) return 0;
              
+             const dealBreakerCodes = [ 56, 57, 66, 67, 71, 73, 75, 77, 85, 86, 96, 99 ]; 
+             const precipPenaltyFactor = config.precipPenaltyFactor || 2.0;
+             let precipMultiplier = dealBreakerCodes.includes(weatherCode) ? 0 : Math.max(0, 1 - (precip_mm / precipPenaltyFactor));
+
+             const runnableSnowCodes = [71, 73, 85];
+             if (selectedSport === 'running' && runnableSnowCodes.includes(weatherCode)) {
+                precipMultiplier = 0.3;
+             }
+
+             if (precipMultiplier === 0) return 0;
+
              let tempScore = 0;
              if (tempC < config.idealTemp[0]) tempScore = Math.max(0, 1 - (config.idealTemp[0] - tempC) / 15);
              else if (tempC > config.idealTemp[1]) tempScore = Math.max(0, 1 - (tempC - config.idealTemp[1]) / 15);
              else tempScore = 1;
 
-             const badWeatherCodes = [56, 57, 66, 67, 75, 77, 85, 86, 96, 99];
-             let precipScore = badWeatherCodes.includes(weatherCode) ? 0 : (precip_mm > 2 ? 0 : 1 - precip_mm / 2);
              let windScore = wind_kmh > 35 ? 0 : 1 - wind_kmh / 35;
              let humScore = (hum >= 40 && hum <= 60) ? 1 : 1 - Math.min(Math.abs(hum - 50) / 50, 1);
              let cloudsScore = clouds > 100 ? 0 : 1 - clouds / 100;
              let uvScore = uv < 3 ? 1 : (uv > 11 ? 0 : 1 - ((uv - 3) / 8));
              const vis_km = visibility_m / 1000;
              let visibilityScore = vis_km > 10 ? 1 : (vis_km < 1 ? 0 : (vis_km - 1) / 9);
-             const score = ((config.weights.temp * tempScore) + (config.weights.precip * precipScore) + (config.weights.wind * windScore) + (config.weights.humidity * humScore) + (config.weights.clouds * cloudsScore) + (config.weights.uv * uvScore) + (config.weights.visibility * visibilityScore));
-             return Math.round(score * 100);
+             
+             let weightedSum = 0;
+             let totalWeight = 0;
+             for (const factor in config.weights) {
+                let score = 0;
+                if (factor === 'temp') score = tempScore;
+                if (factor === 'wind') score = windScore;
+                if (factor === 'humidity') score = humScore;
+                if (factor === 'clouds') score = cloudsScore;
+                if (factor === 'uv') score = uvScore;
+                if (factor === 'visibility') score = visibilityScore;
+                
+                weightedSum += score * config.weights[factor];
+                totalWeight += config.weights[factor];
+             }
+             
+             const baseScore = totalWeight > 0 ? (weightedSum / totalWeight) : 1;
+             const finalScore = baseScore * precipMultiplier;
+             
+             return Math.round(finalScore * 100);
         }
 
         function findBestTime(hourlyData, config, startIndex) {
@@ -454,10 +533,10 @@
                 const currentDayStr = hourlyData.time[i].split('T')[0];
 
                 if (currentDayStr !== todayStr) {
-                    break; 
+                    break;
                 }
 
-                if (hour >= 6 && hour <= 23) {
+                if (hour >= 6 && hour <= 21) {
                     const score = calculatePlayability(hourlyData, config, i);
                     if (score > highestScore) {
                         highestScore = score;
@@ -529,9 +608,10 @@
                 const bestTimeDate = new Date(bestTime.time);
                 $('best-time').innerHTML = `Today at ${bestTimeDate.toLocaleTimeString([], {hour: 'numeric', minute:'2-digit'})} (Score: ${bestTime.score})`;
             } else {
-                $('best-time').textContent = 'No ideal time left today (6 AM - 11 PM).';
+                $('best-time').textContent = 'No ideal time left today (6 AM - 9 PM).';
             }
 
+            renderHourlyForecast(hourly, config, idx);
             renderForecast(data, config);
         }
 
@@ -540,10 +620,61 @@
             return map[code] || 'Unknown';
         }
         
+        // --- NEW: Helper to get a simple icon for weather codes ---
+        function getIconForWeatherCode(code) {
+            if ([0, 1].includes(code)) return '☀️'; // Clear, Mainly Clear
+            if ([2].includes(code)) return '⛅️'; // Partly Cloudy
+            if ([3].includes(code)) return '☁️'; // Overcast
+            if ([45, 48].includes(code)) return '🌫️'; // Fog
+            if ([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82].includes(code)) return '🌧️'; // Drizzle, Rain
+            if ([71, 73, 75, 77, 85, 86].includes(code)) return '❄️'; // Snow
+            if ([95, 96, 99].includes(code)) return '⛈️'; // Thunderstorm
+            return '❓';
+        }
+        
         function cToF(c) { return c * 9 / 5 + 32 }
         function mpsToMph(mps) { return mps * 2.23694 }
         
-        // --- UPDATED: Forecast scoring logic is now more realistic ---
+        // --- NEW: Renders the hourly forecast ---
+        function renderHourlyForecast(hourlyData, config, startIndex) {
+            const container = $('hourly-content');
+            let html = '';
+            const hoursToConsider = Math.min(startIndex + 24, hourlyData.time.length);
+            
+            for (let i = startIndex; i < hoursToConsider; i++) {
+                const date = new Date(hourlyData.time[i]);
+                const timeString = date.toLocaleTimeString([], { hour: 'numeric', hour12: true }).replace(' ', '');
+
+                const tempC = hourlyData.temperature_2m[i];
+                let tempDisplay, tempUnit;
+                if (units === 'imperial') {
+                    tempDisplay = Math.round(cToF(tempC));
+                    tempUnit = '°F';
+                } else {
+                    tempDisplay = Math.round(tempC);
+                    tempUnit = '°C';
+                }
+
+                const weatherCode = hourlyData.weathercode[i];
+                const icon = getIconForWeatherCode(weatherCode);
+
+                const score = calculatePlayability(hourlyData, config, i);
+                let scoreColor = '#ef4444'; // Bad (red)
+                if (score >= 80) scoreColor = '#22c55e'; // Good (green)
+                else if (score >= 50) scoreColor = '#eab308'; // Fair (yellow)
+
+                html += `
+                    <div class="hourly-item">
+                        <div>${timeString}</div>
+                        <div class="hourly-icon">${icon}</div>
+                        <div>${tempDisplay}${tempUnit}</div>
+                        <div class="hourly-score" style="background-color:${scoreColor}; color: white;">${score}</div>
+                    </div>
+                `;
+            }
+            container.innerHTML = html;
+        }
+
         function renderForecast(data, config) {
             const hourly = data.hourly || {};
             const times = hourly.time || [];
@@ -561,16 +692,15 @@
                 const dayIndices = dayGroups[day];
                 if (!dayIndices || dayIndices.length === 0) return;
                 
-                // Filter for viable playing hours (6 AM - 11 PM)
                 const viableIndices = dayIndices.filter(i => {
                     const hour = new Date(times[i]).getHours();
-                    return hour >= 6 && hour <= 23;
+                    return hour >= 6 && hour <= 21;
                 });
 
                 let finalScore = 0;
                 if (viableIndices.length > 0) {
                     const hourlyScores = viableIndices.map(i => calculatePlayability(hourly, config, i));
-                    finalScore = Math.max(...hourlyScores);
+                    finalScore = Math.round(Math.max(...hourlyScores));
                 }
                 
                 const dayTempsC = dayIndices.map(i => hourly.temperature_2m[i]).filter(t => t !== null && t !== undefined);
