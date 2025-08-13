@@ -75,7 +75,11 @@
             color: inherit;
             padding: 8px 12px;
             border-radius: 10px;
-            cursor: pointer
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+        }
+        .btn:hover {
+            background-color: rgba(255,255,255,0.05);
         }
 
         .btn.primary {
@@ -102,7 +106,8 @@
 
         .big {
             font-size: 36px;
-            font-weight: 700
+            font-weight: 700;
+            transition: opacity 0.4s ease;
         }
 
         .muted {
@@ -120,19 +125,19 @@
             background: rgba(255, 255, 255, 0.02);
             padding: 12px;
             border-radius: 10px;
-            text-align: center
+            text-align: center;
+            transition: transform 0.2s ease, background-color 0.2s ease;
         }
-
-        .rating {
-            display: flex;
-            gap: 10px;
-            align-items: center
+        .stat:hover {
+            transform: translateY(-3px);
+            background-color: rgba(255, 255, 255, 0.05);
         }
 
         .pill {
             padding: 6px 10px;
             border-radius: 999px;
-            background: rgba(255, 255, 255, 0.03)
+            background: rgba(255, 255, 255, 0.03);
+            transition: background-color 0.4s ease, opacity 0.4s ease;
         }
 
         .sport-list {
@@ -146,7 +151,11 @@
             padding: 8px 10px;
             border-radius: 10px;
             cursor: pointer;
-            border: 1px solid rgba(255, 255, 255, 0.04)
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            transition: border-color 0.2s ease, background-color 0.2s ease;
+        }
+        .sport:not(.active):hover {
+            border-color: rgba(255,255,255,0.1);
         }
 
         .sport.active {
@@ -170,72 +179,29 @@
 
         input[type="number"] { width: 120px; }
         input[type="text"] { width: 180px; }
+        
+        #forecast { margin-top: 24px; }
+        #forecast h2 { margin-bottom: 8px; }
+        .forecast-day { background: rgba(255,255,255,0.05); border-radius: 10px; padding: 10px; margin-bottom: 8px; }
 
-        .error {
-            color: #ffb4b4
-        }
+        #hourly-scroll-container { overflow-x: auto; white-space: nowrap; padding-bottom: 12px; }
+        #hourly-content { display: flex; gap: 12px; }
+        .hourly-item { flex-shrink: 0; width: 75px; padding: 12px 8px; border-radius: 10px; background: rgba(255, 255, 255, 0.03); text-align: center; font-size: 13px; }
+        .hourly-icon { font-size: 24px; margin: 4px 0; }
+        .hourly-score { font-size: 12px; padding: 2px 6px; border-radius: 999px; margin-top: 4px; font-weight: 500; transition: background-color 0.4s ease; }
+        #hourly-scroll-container::-webkit-scrollbar { height: 6px; }
+        #hourly-scroll-container::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.05); border-radius: 3px; }
+        #hourly-scroll-container::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 3px; }
 
-        @media (max-width:700px) {
-            .stat-grid {
-                grid-template-columns: repeat(3, 1fr);
-            }
-        }
+        .rain-alert { background-color: rgba(6, 78, 117, 0.5); border: 1px solid rgba(14, 165, 233, 0.4); padding: 12px; border-radius: 10px; margin-bottom: 18px; font-weight: 500;}
+        
+        #save-fav-btn { background: none; border: none; cursor: pointer; font-size: 18px; padding: 0 4px; transition: color 0.2s ease; color: var(--muted); }
+        #save-fav-btn.is-favorite { color: #eab308; }
 
-        #forecast {
-            margin-top: 24px;
-        }
-        #forecast h2 {
-            margin-bottom: 8px;
-        }
-        .forecast-day {
-            background: rgba(255,255,255,0.05);
-            border-radius: 10px;
-            padding: 10px;
-            margin-bottom: 8px;
-        }
-
-        /* --- NEW: Styles for Hourly Forecast --- */
-        #hourly-scroll-container {
-            overflow-x: auto;
-            white-space: nowrap;
-            padding-bottom: 12px;
-        }
-        #hourly-content {
-            display: flex;
-            gap: 12px;
-        }
-        .hourly-item {
-            flex-shrink: 0;
-            width: 75px;
-            padding: 12px 8px;
-            border-radius: 10px;
-            background: rgba(255, 255, 255, 0.03);
-            text-align: center;
-            font-size: 13px;
-        }
-        .hourly-icon {
-            font-size: 24px;
-            margin: 4px 0;
-        }
-        .hourly-score {
-            font-size: 12px;
-            padding: 2px 6px;
-            border-radius: 999px;
-            margin-top: 4px;
-            font-weight: 500;
-        }
-
-        #hourly-scroll-container::-webkit-scrollbar {
-            height: 6px;
-        }
-        #hourly-scroll-container::-webkit-scrollbar-track {
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 3px;
-        }
-        #hourly-scroll-container::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.2);
-            border-radius: 3px;
-        }
+        #favorites-section .btn { font-size: 13px; padding: 6px 10px; }
+        #favorites-section .delete-btn { color: #ffb4b4; padding: 6px 8px; }
+        
+        .explain { margin-top: 10px; color: var(--muted); font-size: 13px; font-style: italic; }
 
     </style>
 </head>
@@ -259,6 +225,7 @@
         </header>
 
         <div class="card">
+            <div id="rain-alert" class="rain-alert" style="display: none;"></div>
             <div class="row">
                 <div class="col">
                     <div class="metric">
@@ -268,7 +235,10 @@
                         </div>
                         <div style="margin-left:auto;text-align:right">
                             <div class="muted">Location</div>
-                            <div id="loc">detecting…</div>
+                            <div id="loc-container" style="display:flex; align-items:center; gap: 4px; justify-content: flex-end;">
+                                <span id="loc">detecting…</span>
+                                <button id="save-fav-btn" style="display: none;">☆</button>
+                            </div>
                             <div class="muted" style="font-size:12px" id="time">--</div>
                         </div>
                     </div>
@@ -282,6 +252,8 @@
                         <div class="stat">Pressure<br><strong id="press">--</strong></div>
                         <div class="stat">UV Index<br><strong id="uv">--</strong></div>
                         <div class="stat">Visibility<br><strong id="vis">--</strong></div>
+                        <div class="stat">Sunrise<br><strong id="sunrise">--</strong></div>
+                        <div class="stat">Sunset<br><strong id="sunset">--</strong></div>
                     </div>
 
                 </div>
@@ -301,28 +273,29 @@
                             <div id="play-badge" class="pill">--</div>
                             <div class="muted" id="score">Score: --/100</div>
                         </div>
+                        <div id="reason" class="explain"></div>
                     </div>
 
                     <div style="margin-top:14px">
-                        <div class="muted">Best Time to Play Today</div>
-                        <div id="best-time" style="font-weight:bold; color: #a5f3fc; margin-top: 4px;">Analyzing...</div>
+                        <div class="muted">Good Play Windows Today</div>
+                        <div id="play-windows" style="font-weight:bold; color: #a5f3fc; margin-top: 4px;">Analyzing...</div>
                     </div>
-
                 </div>
             </div>
 
             <div id="hourly-forecast-section" class="card" style="padding-top: 12px;">
                 <h2 style="margin-top:0; margin-bottom: 12px;">Hourly Forecast</h2>
                 <div id="hourly-scroll-container">
-                    <div id="hourly-content">
-                        </div>
+                    <div id="hourly-content"></div>
                 </div>
             </div>
 
-            <div id="forecast" class="card" style="margin-top: 24px;">
+            <div id="forecast" class="card">
                 <h2>3-Day Playability Forecast</h2>
                 <div id="forecast-content">Loading forecast...</div>
             </div>
+            
+            <div id="favorites-section" class="card"></div>
 
             <div style="margin-top:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
                 <div class="muted">Manual coords</div>
@@ -331,7 +304,6 @@
                 <button class="btn primary" id="apply-coords">Apply</button>
                 <div id="status" style="margin-left:auto" class="muted">API: Open-Meteo</div>
             </div>
-
         </div>
     </div>
 
@@ -395,8 +367,8 @@
 
             const selectedOption = Array.from(suggestionsList.options).find(opt => opt.value === query);
             if (selectedOption) {
-                const lat = selectedOption.dataset.lat;
-                const lon = selectedOption.dataset.lon;
+                const lat = parseFloat(selectedOption.dataset.lat);
+                const lon = parseFloat(selectedOption.dataset.lon);
                 const name = selectedOption.dataset.name;
                 fetchWeather(lat, lon, name);
                 suggestionsList.innerHTML = '';
@@ -444,18 +416,23 @@
         }
 
         async function fetchWeather(lat, lon, locationName = null) {
+            const elementsToFade = ['temp', 'play-badge', 'score'];
+            elementsToFade.forEach(id => $(id).style.opacity = 0);
+            
             $('status').textContent = 'Fetching weather…';
-            const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&hourly=temperature_2m,apparent_temperature,relativehumidity_2m,precipitation,cloudcover,windspeed_10m,surface_pressure,uv_index,visibility,weathercode&timezone=auto`;
+            const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&hourly=temperature_2m,apparent_temperature,relativehumidity_2m,precipitation,cloudcover,windspeed_10m,surface_pressure,uv_index,visibility,weathercode&daily=sunrise,sunset&timezone=auto`;
             try {
                 const res = await fetch(url);
                 if (!res.ok) throw new Error('Weather API error');
                 const data = await res.json();
-                lastData = { data, lat, lon, name: locationName };
+                lastData = { data, lat: parseFloat(lat), lon: parseFloat(lon), name: locationName };
                 render(lastData);
                 $('status').textContent = `Updated ${new Date().toLocaleTimeString()}`;
             } catch (e) {
                 console.error("Error during weather fetch or render:", e);
                 $('status').textContent = 'Weather fetch or render failed.';
+            } finally {
+                elementsToFade.forEach(id => $(id).style.opacity = 1);
             }
         }
         
@@ -519,33 +496,92 @@
              return Math.round(finalScore * 100);
         }
 
-        function findBestTime(hourlyData, config, startIndex) {
-            let bestHourIndex = -1;
-            let highestScore = -1;
+        // --- NEW: Generates the text reason for the current score ---
+        function generateReasonText(hourlyData, config, index) {
+            const score = calculatePlayability(hourlyData, config, index);
+
+            if (score >= 80) {
+                return `✅ Conditions are ideal for ${selectedSport}.`;
+            }
+
+            const tempC = hourlyData.temperature_2m[index];
+            const precip_mm = hourlyData.precipitation[index];
+            const wind_kmh = hourlyData.windspeed_10m[index];
+            const hum = hourlyData.relativehumidity_2m[index];
+            const uv = hourlyData.uv_index[index];
+            const visibility_m = hourlyData.visibility[index];
+            const weatherCode = hourlyData.weathercode[index];
+            const vis_km = visibility_m / 1000;
             
-            if (!hourlyData.time || !hourlyData.time[startIndex]) return { time: null, score: 0 };
+            const reasons = [];
+            if (tempC > config.idealTemp[1]) reasons.push('high temperature');
+            if (tempC < config.idealTemp[0]) reasons.push('low temperature');
+            const isSnowing = [71, 73, 75, 77, 85, 86].includes(weatherCode);
+            if (precip_mm > 0.1 && isSnowing) reasons.push('snow');
+            else if (precip_mm > 0.1) reasons.push('rain');
+            if (wind_kmh > 25) reasons.push('strong wind');
+            if (hum < 30 || hum > 80) reasons.push('humidity');
+            if (uv > 7) reasons.push('high UV index');
+            if (vis_km < 2) reasons.push('poor visibility');
+
+            if (reasons.length === 0 && score < 80) {
+                 return `👍 Conditions are generally good for ${selectedSport}.`;
+            }
+            
+            const prefix = score >= 50 ? 'Fair conditions:' : 'Poor conditions due to:';
+            return `${prefix} ${reasons.join(', ')}.`;
+        }
+
+
+        function findPlayWindows(hourlyData, config, startIndex) {
+            if (!hourlyData.time || !hourlyData.time[startIndex]) return 'Not enough data.';
             
             const todayStr = hourlyData.time[startIndex].split('T')[0];
+            const goodHours = [];
 
             for (let i = startIndex; i < hourlyData.time.length; i++) {
                 const date = new Date(hourlyData.time[i]);
                 const hour = date.getHours();
                 const currentDayStr = hourlyData.time[i].split('T')[0];
 
-                if (currentDayStr !== todayStr) {
-                    break;
-                }
+                if (currentDayStr !== todayStr) break;
 
                 if (hour >= 6 && hour <= 21) {
                     const score = calculatePlayability(hourlyData, config, i);
-                    if (score > highestScore) {
-                        highestScore = score;
-                        bestHourIndex = i;
+                    if (score >= 80) {
+                        goodHours.push(hour);
                     }
                 }
             }
-            if (bestHourIndex === -1) return { time: null, score: 0 };
-            return { time: hourlyData.time[bestHourIndex], score: highestScore };
+
+            if (goodHours.length === 0) {
+                return 'No ideal windows left today.';
+            }
+
+            const windows = [];
+            let currentWindow = [];
+            for (let i = 0; i < goodHours.length; i++) {
+                if (i > 0 && goodHours[i] !== goodHours[i - 1] + 1) {
+                    windows.push(currentWindow);
+                    currentWindow = [];
+                }
+                currentWindow.push(goodHours[i]);
+            }
+            if (currentWindow.length > 0) windows.push(currentWindow);
+
+            return windows.map(window => {
+                const formatOptions = { hour: 'numeric', hour12: true };
+                const startTime = new Date();
+                startTime.setHours(window[0], 0, 0);
+
+                if (window.length > 1) {
+                    const endTime = new Date();
+                    endTime.setHours(window[window.length - 1] + 1, 0, 0);
+                    return `${startTime.toLocaleTimeString([], formatOptions).replace(/\s/g, '')} - ${endTime.toLocaleTimeString([], formatOptions).replace(/\s/g, '')}`;
+                } else {
+                    return startTime.toLocaleTimeString([], formatOptions).replace(/\s/g, '');
+                }
+            }).join(', ');
         }
 
         function render(payload) {
@@ -558,6 +594,7 @@
             
             const cw = data.current_weather;
             const hourly = data.hourly;
+            const daily = data.daily;
             const now = new Date();
             const pad = n => n.toString().padStart(2, '0');
             const isoHour = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:00`;
@@ -573,6 +610,8 @@
             const pressure = hourly.surface_pressure[idx];
             const uv = hourly.uv_index[idx];
             const visibility_m = hourly.visibility[idx];
+            const sunriseTime = new Date(daily.sunrise[0]).toLocaleTimeString([], { hour: 'numeric', minute:'2-digit' });
+            const sunsetTime = new Date(daily.sunset[0]).toLocaleTimeString([], { hour: 'numeric', minute:'2-digit' });
 
             let tempDisplay, feelsDisplay, windDisplay, precipDisplay, visDisplay, windUnit = 'km/h', tempUnit = '°C', visUnit = 'km';
             if (units === 'imperial') {
@@ -594,23 +633,22 @@
             $('press').textContent = pressure ? `${pressure.toFixed(0)} hPa` : '--';
             $('uv').textContent = uv !== null ? uv.toFixed(1) : '--';
             $('vis').textContent = visibility_m !== null ? `${visDisplay} ${visUnit}` : '--';
+            $('sunrise').textContent = sunriseTime;
+            $('sunset').textContent = sunsetTime;
             
             const config = sportsConfig[selectedSport];
             const finalScore = calculatePlayability(hourly, config, idx);
             scoreEl.textContent = `Score: ${finalScore}/100`;
+            $('reason').textContent = generateReasonText(hourly, config, idx);
 
             if (finalScore >= 80) { playBadge.textContent = "Good"; playBadge.style.backgroundColor = "#22c55e"; }
             else if (finalScore >= 50) { playBadge.textContent = "Fair"; playBadge.style.backgroundColor = "#eab308"; }
             else { playBadge.textContent = "Bad"; playBadge.style.backgroundColor = "#ef4444"; }
             
-            const bestTime = findBestTime(hourly, config, idx);
-            if (bestTime.time) {
-                const bestTimeDate = new Date(bestTime.time);
-                $('best-time').innerHTML = `Today at ${bestTimeDate.toLocaleTimeString([], {hour: 'numeric', minute:'2-digit'})} (Score: ${bestTime.score})`;
-            } else {
-                $('best-time').textContent = 'No ideal time left today (6 AM - 9 PM).';
-            }
+            $('play-windows').innerHTML = findPlayWindows(hourly, config, idx);
 
+            renderRainAlert(hourly, idx);
+            updateFavoriteButtonState();
             renderHourlyForecast(hourly, config, idx);
             renderForecast(data, config);
         }
@@ -620,59 +658,127 @@
             return map[code] || 'Unknown';
         }
         
-        // --- NEW: Helper to get a simple icon for weather codes ---
         function getIconForWeatherCode(code) {
-            if ([0, 1].includes(code)) return '☀️'; // Clear, Mainly Clear
-            if ([2].includes(code)) return '⛅️'; // Partly Cloudy
-            if ([3].includes(code)) return '☁️'; // Overcast
-            if ([45, 48].includes(code)) return '🌫️'; // Fog
-            if ([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82].includes(code)) return '🌧️'; // Drizzle, Rain
-            if ([71, 73, 75, 77, 85, 86].includes(code)) return '❄️'; // Snow
-            if ([95, 96, 99].includes(code)) return '⛈️'; // Thunderstorm
-            return '❓';
+            if ([0, 1].includes(code)) return '☀️'; if ([2].includes(code)) return '⛅️'; if ([3].includes(code)) return '☁️'; if ([45, 48].includes(code)) return '🌫️'; if ([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82].includes(code)) return '🌧️'; if ([71, 73, 75, 77, 85, 86].includes(code)) return '❄️'; if ([95, 96, 99].includes(code)) return '⛈️'; return '❓';
         }
         
         function cToF(c) { return c * 9 / 5 + 32 }
         function mpsToMph(mps) { return mps * 2.23694 }
+
+        function renderRainAlert(hourly, currentIndex) {
+            const alertDiv = $('rain-alert');
+            const nextHourPrecip = hourly.precipitation[currentIndex + 1];
+            if (nextHourPrecip > 0.1) {
+                const time = new Date(hourly.time[currentIndex + 1]).toLocaleTimeString([], { hour: 'numeric', minute:'2-digit' });
+                alertDiv.textContent = `💧 Light rain expected to start around ${time}.`;
+                alertDiv.style.display = 'block';
+            } else {
+                alertDiv.style.display = 'none';
+            }
+        }
         
-        // --- NEW: Renders the hourly forecast ---
         function renderHourlyForecast(hourlyData, config, startIndex) {
             const container = $('hourly-content');
             let html = '';
             const hoursToConsider = Math.min(startIndex + 24, hourlyData.time.length);
-            
             for (let i = startIndex; i < hoursToConsider; i++) {
                 const date = new Date(hourlyData.time[i]);
-                const timeString = date.toLocaleTimeString([], { hour: 'numeric', hour12: true }).replace(' ', '');
-
+                const timeString = (i === startIndex) ? "Now" : date.toLocaleTimeString([], { hour: 'numeric' }).replace(/\s/g, '');
                 const tempC = hourlyData.temperature_2m[i];
-                let tempDisplay, tempUnit;
-                if (units === 'imperial') {
-                    tempDisplay = Math.round(cToF(tempC));
-                    tempUnit = '°F';
-                } else {
-                    tempDisplay = Math.round(tempC);
-                    tempUnit = '°C';
-                }
-
-                const weatherCode = hourlyData.weathercode[i];
-                const icon = getIconForWeatherCode(weatherCode);
-
+                let tempDisplay = (units === 'imperial') ? Math.round(cToF(tempC)) : Math.round(tempC);
+                const tempUnit = (units === 'imperial') ? '°F' : '°C';
+                const icon = getIconForWeatherCode(hourlyData.weathercode[i]);
                 const score = calculatePlayability(hourlyData, config, i);
-                let scoreColor = '#ef4444'; // Bad (red)
-                if (score >= 80) scoreColor = '#22c55e'; // Good (green)
-                else if (score >= 50) scoreColor = '#eab308'; // Fair (yellow)
-
-                html += `
-                    <div class="hourly-item">
-                        <div>${timeString}</div>
-                        <div class="hourly-icon">${icon}</div>
-                        <div>${tempDisplay}${tempUnit}</div>
-                        <div class="hourly-score" style="background-color:${scoreColor}; color: white;">${score}</div>
-                    </div>
-                `;
+                let scoreColor = '#ef4444'; if (score >= 80) scoreColor = '#22c55e'; else if (score >= 50) scoreColor = '#eab308';
+                html += `<div class="hourly-item"><div>${timeString}</div><div class="hourly-icon">${icon}</div><div>${tempDisplay}${tempUnit}</div><div class="hourly-score" style="background-color:${scoreColor}; color: white;">${score}</div></div>`;
             }
             container.innerHTML = html;
+        }
+
+        function getFavorites() { return JSON.parse(localStorage.getItem('weather_favorites')) || []; }
+        function saveFavorites(favorites) { localStorage.setItem('weather_favorites', JSON.stringify(favorites)); }
+        
+        function isCurrentLocationFavorite() {
+            if (!lastData || !lastData.name) return false;
+            const favorites = getFavorites();
+            return favorites.some(fav => fav.lat === lastData.lat && fav.lon === lastData.lon);
+        }
+
+        function saveCurrentFavorite() {
+            if (!lastData || !lastData.name) return;
+            const favorites = getFavorites();
+            if (!isCurrentLocationFavorite()) {
+                favorites.push({ name: lastData.name, lat: lastData.lat, lon: lastData.lon });
+                saveFavorites(favorites);
+                renderFavorites();
+                updateFavoriteButtonState();
+            }
+        }
+        
+        function removeCurrentFavorite() {
+            if (!lastData) return;
+            let favorites = getFavorites();
+            favorites = favorites.filter(fav => !(fav.lat === lastData.lat && fav.lon === lastData.lon));
+            saveFavorites(favorites);
+            renderFavorites();
+            updateFavoriteButtonState();
+        }
+
+        function deleteFavorite(index) {
+            let favorites = getFavorites();
+            favorites.splice(index, 1);
+            saveFavorites(favorites);
+            renderFavorites();
+            updateFavoriteButtonState();
+        }
+        
+        function updateFavoriteButtonState() {
+            const btn = $('save-fav-btn');
+            if (!lastData || !lastData.name) {
+                btn.style.display = 'none';
+                return;
+            }
+            btn.style.display = 'inline-block';
+
+            if (isCurrentLocationFavorite()) {
+                btn.textContent = '★';
+                btn.title = 'Remove from favorites';
+                btn.classList.add('is-favorite');
+                btn.onclick = removeCurrentFavorite;
+            } else {
+                btn.textContent = '☆';
+                btn.title = 'Save to favorites';
+                btn.classList.remove('is-favorite');
+                btn.onclick = saveCurrentFavorite;
+            }
+        }
+        
+        function renderFavorites() {
+            const favorites = getFavorites();
+            const container = $('favorites-section');
+            if (favorites.length === 0) {
+                container.innerHTML = '';
+                container.style.display = 'none';
+                return;
+            }
+            container.style.display = 'block';
+            let html = `<h2 style="margin-top:0; margin-bottom: 12px;">Favorites</h2><div class="sport-list">`;
+            favorites.forEach((fav, index) => {
+                html += `<div><button class="btn" data-index="${index}">${fav.name}</button><button class="btn delete-btn" data-index="${index}">×</button></div>`;
+            });
+            html += `</div>`;
+            container.innerHTML = html;
+            container.querySelectorAll('.btn').forEach(btn => {
+                const index = btn.dataset.index;
+                if (btn.classList.contains('delete-btn')) {
+                    btn.addEventListener('click', () => deleteFavorite(index));
+                } else {
+                    btn.addEventListener('click', () => {
+                        const fav = getFavorites()[index];
+                        if (fav) fetchWeather(fav.lat, fav.lon, fav.name);
+                    });
+                }
+            });
         }
 
         function renderForecast(data, config) {
@@ -735,6 +841,7 @@
         }
 
         getLocationAndFetch();
+        renderFavorites();
     </script>
 </body>
 
