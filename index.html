@@ -39,7 +39,8 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            gap: 16px
+            gap: 16px;
+            flex-wrap: wrap;
         }
 
         h1 {
@@ -159,20 +160,16 @@
             font-size: 13px
         }
 
-        .explain {
-            margin-top: 10px;
-            color: var(--muted);
-            font-size: 13px
-        }
-
-        input[type="number"] {
-            width: 120px;
-            padding: 8px;
+        input[type="number"], input[type="text"] {
+            padding: 8px 12px;
             border-radius: 8px;
             border: 1px solid rgba(255, 255, 255, 0.05);
             background: transparent;
-            color: inherit
+            color: inherit;
         }
+
+        input[type="number"] { width: 120px; }
+        input[type="text"] { width: 180px; }
 
         .error {
             color: #ffb4b4
@@ -184,7 +181,6 @@
             }
         }
 
-        /* New styles for forecast */
         #forecast {
             margin-top: 24px;
         }
@@ -205,12 +201,13 @@
         <header>
             <div>
                 <h1>Weather4Sports</h1>
-                <p class="lead">Tells you whether it's good, fair, or bad to play common sports where you are right now.</p>
+                <p class="lead">Get sport-specific weather ratings for your location.</p>
             </div>
             <div class="controls">
-                <button class="btn" id="refresh">🔄 Refresh</button>
-                <button class="btn" id="use-manual">📍 Enter coords</button>
-                <button class="btn" id="export">📥 Export Report</button> <label class="pill muted">Units: <select id="units">
+                <input type="text" id="city-search" placeholder="Search for a city..." list="city-suggestions">
+                <datalist id="city-suggestions"></datalist>
+                <button class="btn" id="refresh">🔄 My Location</button>
+                <label class="pill muted">Units: <select id="units">
                         <option value="metric">Metric (°C, km/h)</option>
                         <option value="imperial" selected>Imperial (°F, mph)</option>
                     </select></label>
@@ -260,7 +257,11 @@
                             <div id="play-badge" class="pill">--</div>
                             <div class="muted" id="score">Score: --/100</div>
                         </div>
-                        <div class="explain" id="reason">--</div>
+                    </div>
+
+                    <div style="margin-top:14px">
+                        <div class="muted">Best Time to Play Today</div>
+                        <div id="best-time" style="font-weight:bold; color: #a5f3fc; margin-top: 4px;">Analyzing...</div>
                     </div>
 
                 </div>
@@ -276,212 +277,260 @@
                 <input type="number" id="lat" placeholder="lat" step="0.0001">
                 <input type="number" id="lon" placeholder="lon" step="0.0001">
                 <button class="btn primary" id="apply-coords">Apply</button>
-                <div id="status" style="margin-left:auto" class="muted">API: Open-Meteo (no key)</div>
+                <div id="status" style="margin-left:auto" class="muted">API: Open-Meteo</div>
             </div>
 
-            <footer>
-                <div>How it works: app detects your location (or you enter coordinates), fetches current weather & hourly
-                    details, then computes a sport-specific score using temperature, wind, precipitation, humidity, and
-                    cloud/visibility basics. Use units toggle for preference.</div>
-            </footer>
         </div>
     </div>
 
     <script>
-        // Helper utilities
         const $ = id => document.getElementById(id);
         const unitsSelect = $('units');
-        let units = unitsSelect.value; // 'metric' or 'imperial'
+        const scoreEl = $('score');
+        const playBadge = $('play-badge');
+        const forecastContent = $('forecast-content');
+        
+        let units = unitsSelect.value;
+        let lastData = null;
 
-        unitsSelect.addEventListener('change', () => {
-            units = unitsSelect.value;
-            if (lastData) render(lastData);
-        })
-
-        // --- UPDATED: More realistic sport configurations with new factors ---
         const sportsConfig = {
-            basketball: { weights: { temp: 0.35, precip: 0.35, wind: 0.15, humidity: 0.05, clouds: 0.0, uv: 0.1, visibility: 0.0 }, idealTemp: [15, 28] }, // Outdoor court
+            basketball: { weights: { temp: 0.35, precip: 0.35, wind: 0.15, humidity: 0.05, clouds: 0.0, uv: 0.1, visibility: 0.0 }, idealTemp: [15, 28] },
             soccer:     { weights: { temp: 0.25, precip: 0.3, wind: 0.15, humidity: 0.05, clouds: 0.05, uv: 0.1, visibility: 0.1 }, idealTemp: [10, 25] },
             tennis:     { weights: { temp: 0.25, precip: 0.3, wind: 0.2, humidity: 0.05, clouds: 0.0, uv: 0.1, visibility: 0.1 }, idealTemp: [12, 30] },
             baseball:   { weights: { temp: 0.20, precip: 0.3, wind: 0.15, humidity: 0.05, clouds: 0.05, uv: 0.1, visibility: 0.15 }, idealTemp: [12, 32] },
             running:    { weights: { temp: 0.30, precip: 0.1, wind: 0.15, humidity: 0.15, clouds: 0.05, uv: 0.2, visibility: 0.05 }, idealTemp: [8, 20] }
         };
 
-
         let selectedSport = 'basketball';
+
+        unitsSelect.addEventListener('change', () => {
+            units = unitsSelect.value;
+            if (lastData) render(lastData);
+        });
+
         document.querySelectorAll('.sport').forEach(el => el.addEventListener('click', () => {
             document.querySelectorAll('.sport').forEach(s => s.classList.remove('active'));
             el.classList.add('active');
             selectedSport = el.dataset.sport;
             if (lastData) render(lastData);
-        }))
+        }));
 
-        // UI elements
-        const statusEl = $('status');
-        const playBadge = $('play-badge');
-        const reasonEl = $('reason');
-        const scoreEl = $('score');
-        const forecastContent = $('forecast-content');
-
-        document.getElementById('refresh').addEventListener('click', () => {
-            getLocationAndFetch();
-        })
-        document.getElementById('use-manual').addEventListener('click', () => {
-            alert('Enter latitude and longitude in the boxes below and click Apply.');
-        })
-        document.getElementById('apply-coords').addEventListener('click', () => {
+        $('refresh').addEventListener('click', getLocationAndFetch);
+        $('apply-coords').addEventListener('click', () => {
             const lat = parseFloat($('lat').value);
             const lon = parseFloat($('lon').value);
-            if (Number.isFinite(lat) && Number.isFinite(lon)) {
-                fetchWeather(lat, lon);
-            } else {
-                alert('Please enter valid coordinates (numbers).');
-            }
-        })
+            if (Number.isFinite(lat) && Number.isFinite(lon)) fetchWeather(lat, lon);
+            else alert('Please enter valid coordinates.');
+        });
+        
+        const searchInput = $('city-search');
+        const suggestionsList = $('city-suggestions');
 
-        // Export to CSV
-        document.getElementById('export').addEventListener('click', () => {
-            if (!lastData) {
-                alert('No data to export yet.');
+        function debounce(func, delay) {
+            let timeout;
+            return function(...args) {
+                clearTimeout(timeout);
+                timeout = setTimeout(() => func.apply(this, args), delay);
+            };
+        }
+        
+        const handleSearchInput = async (event) => {
+            const query = event.target.value;
+            if (query.length < 3) {
+                suggestionsList.innerHTML = '';
                 return;
             }
-            exportCSV(lastData);
-        })
 
-        // Geolocation with graceful fallback
+            const selectedOption = Array.from(suggestionsList.options).find(opt => opt.value === query);
+            if (selectedOption) {
+                const lat = selectedOption.dataset.lat;
+                const lon = selectedOption.dataset.lon;
+                const name = selectedOption.dataset.name;
+                fetchWeather(lat, lon, name);
+                suggestionsList.innerHTML = '';
+                searchInput.value = '';
+                return;
+            }
+
+            try {
+                const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=5`;
+                const response = await fetch(url);
+                const data = await response.json();
+                suggestionsList.innerHTML = '';
+                if (data.results) {
+                    data.results.forEach(location => {
+                        const option = document.createElement('option');
+                        const region = location.admin1 || '';
+                        const country = location.country_code;
+                        option.value = `${location.name}${region ? ', ' + region : ''}, ${country}`;
+                        option.dataset.lat = location.latitude;
+                        option.dataset.lon = location.longitude;
+                        option.dataset.name = location.name;
+                        suggestionsList.appendChild(option);
+                    });
+                }
+            } catch (e) {
+                console.error("Geocoding fetch failed:", e);
+            }
+        };
+
+        searchInput.addEventListener('input', debounce(handleSearchInput, 300));
+
         function getLocationAndFetch() {
             if (!navigator.geolocation) {
-                statusEl.textContent = 'Geolocation unavailable — enter coords manually.';
+                $('status').textContent = 'Geolocation unavailable.';
                 return;
             }
-            statusEl.textContent = 'Getting location…';
-            navigator.geolocation.getCurrentPosition(pos => {
-                const { latitude, longitude } = pos.coords;
-                fetchWeather(latitude, longitude);
-            }, err => {
-                statusEl.textContent = 'Location denied — enter coords manually.';
-            }, { enableHighAccuracy: true, timeout: 8000 });
+            $('loc').textContent = 'Getting location…';
+            navigator.geolocation.getCurrentPosition(
+                pos => fetchWeather(pos.coords.latitude, pos.coords.longitude),
+                err => {
+                    $('status').textContent = 'Location denied.';
+                    alert('Location access was denied. Please use the search bar or enter coordinates manually.');
+                }
+            );
         }
 
-        // --- UPDATED: Fetching UV Index and Visibility from API ---
-        async function fetchWeather(lat, lon) {
-            statusEl.textContent = 'Fetching weather…';
-            const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&hourly=temperature_2m,apparent_temperature,relativehumidity_2m,precipitation,cloudcover,windspeed_10m,surface_pressure,uv_index,visibility&timezone=auto`;
+        async function fetchWeather(lat, lon, locationName = null) {
+            $('status').textContent = 'Fetching weather…';
+            const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&hourly=temperature_2m,apparent_temperature,relativehumidity_2m,precipitation,cloudcover,windspeed_10m,surface_pressure,uv_index,visibility,weathercode&timezone=auto`;
             try {
                 const res = await fetch(url);
                 if (!res.ok) throw new Error('Weather API error');
                 const data = await res.json();
-                lastData = { data, lat, lon };
+                lastData = { data, lat, lon, name: locationName };
                 render(lastData);
-                statusEl.textContent = 'Updated just now';
+                $('status').textContent = `Updated ${new Date().toLocaleTimeString()}`;
             } catch (e) {
-                console.error(e);
-                statusEl.textContent = 'Weather fetch failed — try again.';
+                console.error("Error during weather fetch or render:", e);
+                $('status').textContent = 'Weather fetch or render failed.';
             }
         }
+        
+        function calculatePlayability(hourlyData, config, hourIndex) {
+             if (hourIndex === undefined || hourIndex < 0 || !hourlyData) return 0;
+             const requiredKeys = ['temperature_2m', 'precipitation', 'windspeed_10m', 'relativehumidity_2m', 'cloudcover', 'uv_index', 'visibility', 'weathercode'];
+             if (requiredKeys.some(key => !hourlyData[key] || hourlyData[key].length <= hourIndex)) return 0;
 
-        // Convert units
-        function cToF(c) { return c * 9 / 5 + 32 }
-        function mpsToMph(mps) { return mps * 2.23694 }
-        function msToKmh(m) { return m * 3.6 }
-        function mToKm(m) { return m / 1000 }
-        function mToMi(m) { return m / 1609.34 }
+             const tempC = hourlyData.temperature_2m[hourIndex];
+             const precip_mm = hourlyData.precipitation[hourIndex];
+             const wind_kmh = hourlyData.windspeed_10m[hourIndex];
+             const hum = hourlyData.relativehumidity_2m[hourIndex];
+             const clouds = hourlyData.cloudcover[hourIndex];
+             const uv = hourlyData.uv_index[hourIndex];
+             const visibility_m = hourlyData.visibility[hourIndex];
+             const weatherCode = hourlyData.weathercode[hourIndex];
 
-        // Main render
-        let lastData = null;
+             if ([tempC, precip_mm, wind_kmh, hum, clouds, uv, visibility_m, weatherCode].some(v => v === undefined || v === null)) return 0;
+             
+             let tempScore = 0;
+             if (tempC < config.idealTemp[0]) tempScore = Math.max(0, 1 - (config.idealTemp[0] - tempC) / 15);
+             else if (tempC > config.idealTemp[1]) tempScore = Math.max(0, 1 - (tempC - config.idealTemp[1]) / 15);
+             else tempScore = 1;
+
+             const badWeatherCodes = [56, 57, 66, 67, 75, 77, 85, 86, 96, 99];
+             let precipScore = badWeatherCodes.includes(weatherCode) ? 0 : (precip_mm > 2 ? 0 : 1 - precip_mm / 2);
+             let windScore = wind_kmh > 35 ? 0 : 1 - wind_kmh / 35;
+             let humScore = (hum >= 40 && hum <= 60) ? 1 : 1 - Math.min(Math.abs(hum - 50) / 50, 1);
+             let cloudsScore = clouds > 100 ? 0 : 1 - clouds / 100;
+             let uvScore = uv < 3 ? 1 : (uv > 11 ? 0 : 1 - ((uv - 3) / 8));
+             const vis_km = visibility_m / 1000;
+             let visibilityScore = vis_km > 10 ? 1 : (vis_km < 1 ? 0 : (vis_km - 1) / 9);
+             const score = ((config.weights.temp * tempScore) + (config.weights.precip * precipScore) + (config.weights.wind * windScore) + (config.weights.humidity * humScore) + (config.weights.clouds * cloudsScore) + (config.weights.uv * uvScore) + (config.weights.visibility * visibilityScore));
+             return Math.round(score * 100);
+        }
+
+        function findBestTime(hourlyData, config, startIndex) {
+            let bestHourIndex = -1;
+            let highestScore = -1;
+            
+            if (!hourlyData.time || !hourlyData.time[startIndex]) return { time: null, score: 0 };
+            
+            const todayStr = hourlyData.time[startIndex].split('T')[0];
+
+            for (let i = startIndex; i < hourlyData.time.length; i++) {
+                const date = new Date(hourlyData.time[i]);
+                const hour = date.getHours();
+                const currentDayStr = hourlyData.time[i].split('T')[0];
+
+                if (currentDayStr !== todayStr) {
+                    break; 
+                }
+
+                if (hour >= 6 && hour <= 23) {
+                    const score = calculatePlayability(hourlyData, config, i);
+                    if (score > highestScore) {
+                        highestScore = score;
+                        bestHourIndex = i;
+                    }
+                }
+            }
+            if (bestHourIndex === -1) return { time: null, score: 0 };
+            return { time: hourlyData.time[bestHourIndex], score: highestScore };
+        }
 
         function render(payload) {
-            const { data, lat, lon } = payload;
-            const cw = data.current_weather || {};
-            const hourly = data.hourly || {};
-            const times = hourly.time || [];
+            const { data, lat, lon, name } = payload;
+            
+            if (!data || !data.current_weather || !data.hourly || !data.hourly.time || data.hourly.time.length === 0) {
+                $('status').textContent = 'Incomplete weather data received.';
+                return;
+            }
+            
+            const cw = data.current_weather;
+            const hourly = data.hourly;
             const now = new Date();
             const pad = n => n.toString().padStart(2, '0');
-            const isoHour = now.getFullYear() + "-" + (pad(now.getMonth() + 1)) + "-" + pad(now.getDate()) + "T" + pad(now.getHours()) + ":00";
-            let idx = times.indexOf(isoHour);
-            if (idx === -1) idx = 0; // Fallback to first hour if current not found
+            const isoHour = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:00`;
+            let idx = hourly.time.indexOf(isoHour);
+            if (idx === -1) idx = 0;
 
-            // Extract all current weather variables
-            const tempC = hourly.temperature_2m?.[idx] ?? cw.temperature;
-            const feelsC = hourly.apparent_temperature?.[idx] ?? tempC;
-            const hum = hourly.relativehumidity_2m?.[idx] ?? null;
-            const precip_mm = hourly.precipitation?.[idx] ?? 0;
-            const clouds = hourly.cloudcover?.[idx] ?? null;
-            const wind_kmh = cw.windspeed ?? hourly.windspeed_10m?.[idx] ?? null;
-            const pressure = hourly.surface_pressure?.[idx] ?? null;
-            const uv = hourly.uv_index?.[idx] ?? null;
-            const visibility_m = hourly.visibility?.[idx] ?? null;
-            
-            // --- UPDATED: Display logic for new variables ---
-            let tempDisplay = tempC, feelsDisplay = feelsC, windDisplay = wind_kmh, precipDisplay = precip_mm, visDisplay, windUnit = 'km/h', tempUnit = '°C', visUnit = 'km';
+            const tempC = hourly.temperature_2m[idx];
+            const feelsC = hourly.apparent_temperature[idx];
+            const hum = hourly.relativehumidity_2m[idx];
+            const precip_mm = hourly.precipitation[idx];
+            const clouds = hourly.cloudcover[idx];
+            const wind_kmh = cw.windspeed;
+            const pressure = hourly.surface_pressure[idx];
+            const uv = hourly.uv_index[idx];
+            const visibility_m = hourly.visibility[idx];
+
+            let tempDisplay, feelsDisplay, windDisplay, precipDisplay, visDisplay, windUnit = 'km/h', tempUnit = '°C', visUnit = 'km';
             if (units === 'imperial') {
-                tempDisplay = Math.round(cToF(tempC)); feelsDisplay = Math.round(cToF(feelsC)); windDisplay = Math.round(mpsToMph(wind_kmh / 3.6)); precipDisplay = (precip_mm * 0.0393701).toFixed(2); visDisplay = mToMi(visibility_m).toFixed(1);
+                tempDisplay = Math.round(cToF(tempC)); feelsDisplay = Math.round(cToF(feelsC)); windDisplay = Math.round(mpsToMph(wind_kmh / 3.6)); precipDisplay = (precip_mm * 0.0393701).toFixed(2); visDisplay = (visibility_m / 1609.34).toFixed(1);
                 windUnit = 'mph'; tempUnit = '°F'; visUnit = 'mi';
             } else {
-                tempDisplay = Math.round(tempC); feelsDisplay = Math.round(feelsC); windDisplay = Math.round(wind_kmh); precipDisplay = precip_mm.toFixed(1); visDisplay = mToKm(visibility_m).toFixed(1);
+                tempDisplay = Math.round(tempC); feelsDisplay = Math.round(feelsC); windDisplay = Math.round(wind_kmh); precipDisplay = precip_mm.toFixed(1); visDisplay = (visibility_m / 1000).toFixed(1);
             }
 
             $('temp').textContent = `${tempDisplay}${tempUnit}`;
             $('desc').textContent = mapWeatherCodeToText(cw.weathercode);
-            $('loc').textContent = `Lat ${lat.toFixed(3)}, Lon ${lon.toFixed(3)}`;
-            $('time').textContent = new Date().toLocaleString();
-            $('wind').textContent = windDisplay + ' ' + windUnit;
-            $('precip').textContent = (precipDisplay === null ? '--' : precipDisplay + (units === 'imperial' ? ' in' : ' mm'));
-            $('hum').textContent = (hum === null ? '--' : hum + '%');
-            $('clouds').textContent = (clouds === null ? '--' : clouds + '%');
+            $('loc').textContent = name || `Lat ${lat.toFixed(2)}, Lon ${lon.toFixed(2)}`;
+            $('time').textContent = now.toLocaleString();
+            $('wind').textContent = `${windDisplay} ${windUnit}`;
+            $('precip').textContent = `${precipDisplay} ${units === 'imperial' ? 'in' : 'mm'}`;
+            $('hum').textContent = `${hum}%`;
+            $('clouds').textContent = `${clouds}%`;
             $('feels').textContent = `${feelsDisplay}${tempUnit}`;
-            $('press').textContent = pressure ? (pressure.toFixed(0) + ' hPa') : '--';
-            $('uv').textContent = uv?.toFixed(1) ?? '--';
-            $('vis').textContent = visibility_m === null ? '--' : `${visDisplay} ${visUnit}`;
-
-            // --- REVISED: More realistic playability score calculation ---
+            $('press').textContent = pressure ? `${pressure.toFixed(0)} hPa` : '--';
+            $('uv').textContent = uv !== null ? uv.toFixed(1) : '--';
+            $('vis').textContent = visibility_m !== null ? `${visDisplay} ${visUnit}` : '--';
+            
             const config = sportsConfig[selectedSport];
-            
-            // Temperature score
-            let tempScore = 0;
-            if (tempC < config.idealTemp[0]) tempScore = Math.max(0, 1 - (config.idealTemp[0] - tempC) / 15);
-            else if (tempC > config.idealTemp[1]) tempScore = Math.max(0, 1 - (tempC - config.idealTemp[1]) / 15);
-            else tempScore = 1;
-
-            // Precipitation score (with check for hazardous weather types)
-            const badWeatherCodes = [56, 57, 66, 67, 75, 77, 85, 86, 96, 99]; // Freezing, heavy snow, hail
-            let precipScore = badWeatherCodes.includes(cw.weathercode) ? 0 : (precip_mm > 2 ? 0 : 1 - precip_mm / 2);
-
-            // Wind score
-            let windScore = wind_kmh > 35 ? 0 : 1 - wind_kmh / 35;
-            
-            // Humidity score
-            let humScore = (hum >= 40 && hum <= 60) ? 1 : 1 - Math.min(Math.abs(hum - 50) / 50, 1);
-            
-            // Cloud score
-            let cloudsScore = clouds > 100 ? 0 : 1 - clouds / 100;
-
-            // UV score (1 is good, 0 is bad)
-            let uvScore = uv === null ? 0.5 : (uv < 3 ? 1 : (uv > 11 ? 0 : 1 - ((uv - 3) / 8)));
-
-            // Visibility score
-            const vis_km = mToKm(visibility_m);
-            let visibilityScore = visibility_m === null ? 0.5 : (vis_km > 10 ? 1 : (vis_km < 1 ? 0 : (vis_km - 1) / 9));
-
-            // Weighted sum of all scores
-            const score = (
-                (config.weights.temp * tempScore) +
-                (config.weights.precip * precipScore) +
-                (config.weights.wind * windScore) +
-                (config.weights.humidity * humScore) +
-                (config.weights.clouds * cloudsScore) +
-                (config.weights.uv * uvScore) +
-                (config.weights.visibility * visibilityScore)
-            );
-
-            let finalScore = Math.round(score * 100);
+            const finalScore = calculatePlayability(hourly, config, idx);
             scoreEl.textContent = `Score: ${finalScore}/100`;
 
             if (finalScore >= 80) { playBadge.textContent = "Good"; playBadge.style.backgroundColor = "#22c55e"; }
             else if (finalScore >= 50) { playBadge.textContent = "Fair"; playBadge.style.backgroundColor = "#eab308"; }
             else { playBadge.textContent = "Bad"; playBadge.style.backgroundColor = "#ef4444"; }
-
-            reasonEl.innerHTML = generateReason(finalScore, tempC, precip_mm, wind_kmh, hum, clouds, uv, vis_km, selectedSport, cw.weathercode);
+            
+            const bestTime = findBestTime(hourly, config, idx);
+            if (bestTime.time) {
+                const bestTimeDate = new Date(bestTime.time);
+                $('best-time').innerHTML = `Today at ${bestTimeDate.toLocaleTimeString([], {hour: 'numeric', minute:'2-digit'})} (Score: ${bestTime.score})`;
+            } else {
+                $('best-time').textContent = 'No ideal time left today (6 AM - 11 PM).';
+            }
 
             renderForecast(data, config);
         }
@@ -490,28 +539,11 @@
             const map = { 0: 'Clear sky', 1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast', 45: 'Fog', 48: 'Depositing rime fog', 51: 'Light drizzle', 53: 'Moderate drizzle', 55: 'Dense drizzle', 56: 'Light freezing drizzle', 57: 'Dense freezing drizzle', 61: 'Slight rain', 63: 'Moderate rain', 65: 'Heavy rain', 66: 'Light freezing rain', 67: 'Heavy freezing rain', 71: 'Slight snow fall', 73: 'Moderate snow fall', 75: 'Heavy snow fall', 77: 'Snow grains', 80: 'Slight rain showers', 81: 'Moderate rain showers', 82: 'Violent rain showers', 85: 'Slight snow showers', 86: 'Heavy snow showers', 95: 'Thunderstorm', 96: 'Thunderstorm with slight hail', 99: 'Thunderstorm with heavy hail' };
             return map[code] || 'Unknown';
         }
-
-        // --- UPDATED: Explanation generator includes new factors ---
-        function generateReason(score, tempC, precip, wind, hum, clouds, uv, vis_km, sport, code) {
-            const reasons = [];
-            const badWeatherCodes = [56, 57, 66, 67, 75, 77, 85, 86, 96, 99];
-            if (score >= 80) reasons.push("Weather is great for playing " + sport + ".");
-            else if (score >= 50) reasons.push("Conditions are okay but watch for:");
-            else reasons.push("Poor conditions due to:");
-
-            if (tempC < sportsConfig[sport].idealTemp[0]) reasons.push(`Low temperature (${Math.round(tempC)}°C).`);
-            if (tempC > sportsConfig[sport].idealTemp[1]) reasons.push(`High temperature (${Math.round(tempC)}°C).`);
-            if (badWeatherCodes.includes(code)) reasons.push(`Hazardous precipitation (${mapWeatherCodeToText(code).toLowerCase()}).`);
-            else if (precip > 0.5) reasons.push(`Precipitation (${precip.toFixed(1)} mm).`);
-            if (wind > 25) reasons.push(`Strong wind (${Math.round(wind)} km/h).`);
-            if (hum < 30 || hum > 75) reasons.push(`Uncomfortable humidity (${hum}%).`);
-            if (uv > 6) reasons.push(`High UV index (${uv.toFixed(1)}).`);
-            if (vis_km < 2) reasons.push(`Poor visibility (${vis_km.toFixed(1)} km).`);
-            
-            return reasons.join(' ');
-        }
         
-        // --- UPDATED: Forecast includes new factors and units ---
+        function cToF(c) { return c * 9 / 5 + 32 }
+        function mpsToMph(mps) { return mps * 2.23694 }
+        
+        // --- UPDATED: Forecast scoring logic is now more realistic ---
         function renderForecast(data, config) {
             const hourly = data.hourly || {};
             const times = hourly.time || [];
@@ -528,14 +560,29 @@
             days.forEach(day => {
                 const dayIndices = dayGroups[day];
                 if (!dayIndices || dayIndices.length === 0) return;
-                const dayTempsC = dayIndices.map(i => hourly.temperature_2m[i]);
+                
+                // Filter for viable playing hours (6 AM - 11 PM)
+                const viableIndices = dayIndices.filter(i => {
+                    const hour = new Date(times[i]).getHours();
+                    return hour >= 6 && hour <= 23;
+                });
+
+                let finalScore = 0;
+                if (viableIndices.length > 0) {
+                    const hourlyScores = viableIndices.map(i => calculatePlayability(hourly, config, i));
+                    finalScore = Math.max(...hourlyScores);
+                }
+                
+                const dayTempsC = dayIndices.map(i => hourly.temperature_2m[i]).filter(t => t !== null && t !== undefined);
+                if (dayTempsC.length === 0) return;
+
                 const lowTempC = Math.min(...dayTempsC);
                 const highTempC = Math.max(...dayTempsC);
+                
                 let noonIndex = dayIndices.find(i => times[i].endsWith('12:00')) ?? dayIndices[Math.floor(dayIndices.length / 2)];
                 const precip_mm = hourly.precipitation?.[noonIndex] ?? 0;
                 const wind_kmh = hourly.windspeed_10m?.[noonIndex] ?? 0;
-                const hum = hourly.relativehumidity_2m?.[noonIndex] ?? 0;
-                const uv = hourly.uv_index?.[noonIndex] ?? 0;
+                const uv = hourly.uv_index?.[noonIndex];
                 let lowTempDisplay, highTempDisplay, tempUnit, windDisplay, windUnit, precipDisplay, precipUnit;
                 if (units === 'imperial') {
                     lowTempDisplay = Math.round(cToF(lowTempC)); highTempDisplay = Math.round(cToF(highTempC)); tempUnit = '°F';
@@ -546,59 +593,18 @@
                     windDisplay = Math.round(wind_kmh); windUnit = 'km/h';
                     precipDisplay = precip_mm.toFixed(1); precipUnit = 'mm';
                 }
-                const tempForScore = highTempC;
-                let tempScore = 0;
-                if (tempForScore < config.idealTemp[0]) tempScore = Math.max(0, 1 - (config.idealTemp[0] - tempForScore) / 15);
-                else if (tempForScore > config.idealTemp[1]) tempScore = Math.max(0, 1 - (tempForScore - tempForScore) / 15); else tempScore = 1;
-                let precipScore = precip_mm > 2 ? 0 : 1 - precip_mm / 2;
-                let windScore = wind_kmh > 35 ? 0 : 1 - wind_kmh / 35;
-                let humScore = (hum >= 40 && hum <= 60) ? 1 : 1 - Math.min(Math.abs(hum - 50) / 50, 1);
-                let uvScore = uv < 3 ? 1 : (uv > 11 ? 0 : 1 - ((uv - 3) / 8));
-                let score = ((config.weights.temp * tempScore) + (config.weights.precip * precipScore) + (config.weights.wind * windScore) + (config.weights.humidity * humScore) + (config.weights.uv * uvScore)) / (config.weights.temp + config.weights.precip + config.weights.wind + config.weights.humidity + config.weights.uv);
-                const finalScore = Math.round(score * 100);
                 const dateObj = new Date(day + 'T12:00:00');
                 const dayStr = dateObj.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-                let badgeText = ''; let badgeColor = '';
+                let badgeText = '', badgeColor = '';
                 if (finalScore >= 80) { badgeText = "Good"; badgeColor = "#22c55e"; }
                 else if (finalScore >= 50) { badgeText = "Fair"; badgeColor = "#eab308"; }
                 else { badgeText = "Bad"; badgeColor = "#ef4444"; }
-                html += `<div class="forecast-day"><strong>${dayStr}</strong> - Score: ${finalScore}/100 <span style="background-color:${badgeColor};color:#fff;padding:2px 6px;border-radius:12px;margin-left:8px;">${badgeText}</span><div style="font-size:12px;color:#bbb;margin-top:4px;">Temp: ${highTempDisplay}/${lowTempDisplay}${tempUnit} &bull; Precip: ${precipDisplay} ${precipUnit} &bull; Wind: ${windDisplay} ${windUnit} &bull; UV: ${uv.toFixed(1)}</div></div>`;
+                html += `<div class="forecast-day"><strong>${dayStr}</strong> - Score: ${finalScore}/100 <span style="background-color:${badgeColor};color:#fff;padding:2px 6px;border-radius:12px;margin-left:8px;">${badgeText}</span><div style="font-size:12px;color:#bbb;margin-top:4px;">Temp: ${highTempDisplay}/${lowTempDisplay}${tempUnit} &bull; Precip: ${precipDisplay} ${precipUnit} &bull; Wind: ${windDisplay} ${windUnit} &bull; UV: ${uv !== null && uv !== undefined ? uv.toFixed(1) : '--'}</div></div>`;
             });
             forecastContent.innerHTML = html;
         }
 
-        // Auto-refresh every 15 minutes
-        setInterval(() => { if (lastData) { fetchWeather(lastData.lat, lastData.lon); } }, 15 * 60 * 1000);
-
-        // Export CSV function
-        function exportCSV(payload) {
-            const { data, lat, lon } = payload;
-            const hourly = data.hourly || {};
-            const times = hourly.time || [];
-            const rows = [['DateTime', 'Temperature(°C)', 'Precipitation(mm)', 'Wind Speed(km/h)', 'Humidity(%)', 'Cloud Cover(%)', 'UV Index', 'Visibility(m)']];
-            for (let i = 0; i < times.length; i++) {
-                rows.push([times[i], hourly.temperature_2m[i], hourly.precipitation[i], hourly.windspeed_10m[i], hourly.relativehumidity_2m[i], hourly.cloudcover[i], hourly.uv_index[i], hourly.visibility[i]]);
-            }
-            rows.push([]);
-            rows.push(['Location', `Lat: ${lat.toFixed(4)}`, `Lon: ${lon.toFixed(4)}`]);
-            rows.push(['Selected Sport', selectedSport]);
-            rows.push(['Current Playability Score', scoreEl.textContent.replace('Score: ', '')]);
-            rows.push(['Current Playability Rating', playBadge.textContent]);
-            let csvContent = rows.map(r => r.join(',')).join('\n');
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `sports-weather-report-${new Date().toISOString().slice(0, 10)}.csv`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-        }
-
-        // On load: get location
         getLocationAndFetch();
-
     </script>
 </body>
 
