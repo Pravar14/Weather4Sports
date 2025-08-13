@@ -7,7 +7,6 @@
     <title>Weather4Sports
     </title>
     <style>
-        /* (same styles as before, omitted here for brevity) */
         :root {
             --bg: #0f1724;
             --card: #0b1220;
@@ -111,7 +110,7 @@
 
         .stat-grid {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
             gap: 12px;
             margin-top: 12px
         }
@@ -181,7 +180,7 @@
 
         @media (max-width:700px) {
             .stat-grid {
-                grid-template-columns: repeat(2, 1fr)
+                grid-template-columns: repeat(3, 1fr);
             }
         }
 
@@ -211,10 +210,9 @@
             <div class="controls">
                 <button class="btn" id="refresh">🔄 Refresh</button>
                 <button class="btn" id="use-manual">📍 Enter coords</button>
-                <button class="btn" id="export">📥 Export Report</button> <!-- New export button -->
-                <label class="pill muted">Units: <select id="units">
+                <button class="btn" id="export">📥 Export Report</button> <label class="pill muted">Units: <select id="units">
                         <option value="metric">Metric (°C, km/h)</option>
-                        <option value="imperial">Imperial (°F, mph)</option>
+                        <option value="imperial" selected>Imperial (°F, mph)</option>
                     </select></label>
             </div>
         </header>
@@ -241,6 +239,8 @@
                         <div class="stat">Clouds<br><strong id="clouds">--</strong></div>
                         <div class="stat">Feels Like<br><strong id="feels">--</strong></div>
                         <div class="stat">Pressure<br><strong id="press">--</strong></div>
+                        <div class="stat">UV Index<br><strong id="uv">--</strong></div>
+                        <div class="stat">Visibility<br><strong id="vis">--</strong></div>
                     </div>
 
                 </div>
@@ -266,7 +266,6 @@
                 </div>
             </div>
 
-            <!-- New multi-day forecast section -->
             <div id="forecast" class="card" style="margin-top: 24px;">
                 <h2>3-Day Playability Forecast</h2>
                 <div id="forecast-content">Loading forecast...</div>
@@ -299,13 +298,15 @@
             if (lastData) render(lastData);
         })
 
+        // --- UPDATED: More realistic sport configurations with new factors ---
         const sportsConfig = {
-            basketball: { weights: { temp: 0.35, precip: 0.3, wind: 0.15, humidity: 0.1, clouds: 0.1 }, idealTemp: [15, 28] }, // Celsius
-            soccer: { weights: { temp: 0.3, precip: 0.35, wind: 0.15, humidity: 0.1, clouds: 0.1 }, idealTemp: [10, 25] },
-            tennis: { weights: { temp: 0.25, precip: 0.4, wind: 0.2, humidity: 0.1, clouds: 0.05 }, idealTemp: [12, 30] },
-            baseball: { weights: { temp: 0.35, precip: 0.3, wind: 0.15, humidity: 0.1, clouds: 0.1 }, idealTemp: [12, 32] },
-            running: { weights: { temp: 0.35, precip: 0.15, wind: 0.2, humidity: 0.2, clouds: 0.1 }, idealTemp: [8, 20] }
+            basketball: { weights: { temp: 0.35, precip: 0.35, wind: 0.15, humidity: 0.05, clouds: 0.0, uv: 0.1, visibility: 0.0 }, idealTemp: [15, 28] }, // Outdoor court
+            soccer:     { weights: { temp: 0.25, precip: 0.3, wind: 0.15, humidity: 0.05, clouds: 0.05, uv: 0.1, visibility: 0.1 }, idealTemp: [10, 25] },
+            tennis:     { weights: { temp: 0.25, precip: 0.3, wind: 0.2, humidity: 0.05, clouds: 0.0, uv: 0.1, visibility: 0.1 }, idealTemp: [12, 30] },
+            baseball:   { weights: { temp: 0.20, precip: 0.3, wind: 0.15, humidity: 0.05, clouds: 0.05, uv: 0.1, visibility: 0.15 }, idealTemp: [12, 32] },
+            running:    { weights: { temp: 0.30, precip: 0.1, wind: 0.15, humidity: 0.15, clouds: 0.05, uv: 0.2, visibility: 0.05 }, idealTemp: [8, 20] }
         };
+
 
         let selectedSport = 'basketball';
         document.querySelectorAll('.sport').forEach(el => el.addEventListener('click', () => {
@@ -362,10 +363,10 @@
             }, { enableHighAccuracy: true, timeout: 8000 });
         }
 
-        // Fetch weather from Open-Meteo (no API key)
+        // --- UPDATED: Fetching UV Index and Visibility from API ---
         async function fetchWeather(lat, lon) {
             statusEl.textContent = 'Fetching weather…';
-            const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&hourly=temperature_2m,apparent_temperature,relativehumidity_2m,precipitation,cloudcover,windspeed_10m,surface_pressure&timezone=auto`;
+            const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&hourly=temperature_2m,apparent_temperature,relativehumidity_2m,precipitation,cloudcover,windspeed_10m,surface_pressure,uv_index,visibility&timezone=auto`;
             try {
                 const res = await fetch(url);
                 if (!res.ok) throw new Error('Weather API error');
@@ -383,292 +384,215 @@
         function cToF(c) { return c * 9 / 5 + 32 }
         function mpsToMph(mps) { return mps * 2.23694 }
         function msToKmh(m) { return m * 3.6 }
+        function mToKm(m) { return m / 1000 }
+        function mToMi(m) { return m / 1609.34 }
 
         // Main render
         let lastData = null;
 
         function render(payload) {
             const { data, lat, lon } = payload;
-            // Determine indices for current hour
             const cw = data.current_weather || {};
-
-            // Find nearest hourly index by matching date-hour
             const hourly = data.hourly || {};
             const times = hourly.time || [];
             const now = new Date();
             const pad = n => n.toString().padStart(2, '0');
             const isoHour = now.getFullYear() + "-" + (pad(now.getMonth() + 1)) + "-" + pad(now.getDate()) + "T" + pad(now.getHours()) + ":00";
             let idx = times.indexOf(isoHour);
-            if (idx === -1) idx = 0;
+            if (idx === -1) idx = 0; // Fallback to first hour if current not found
 
-            const tempC = (hourly.temperature_2m && hourly.temperature_2m[idx] != null) ? hourly.temperature_2m[idx] : cw.temperature;
-            const feelsC = (hourly.apparent_temperature && hourly.apparent_temperature[idx] != null) ? hourly.apparent_temperature[idx] : tempC;
-            const hum = (hourly.relativehumidity_2m && hourly.relativehumidity_2m[idx] != null) ? hourly.relativehumidity_2m[idx] : (hourly.relativehumidity_2m ? hourly.relativehumidity_2m[0] : null);
-            const precip = (hourly.precipitation && hourly.precipitation[idx] != null) ? hourly.precipitation[idx] : 0;
-            const clouds = (hourly.cloudcover && hourly.cloudcover[idx] != null) ? hourly.cloudcover[idx] : null;
-            const wind_kmh = cw.windspeed ? cw.windspeed : (hourly.windspeed_10m && hourly.windspeed_10m[idx] ? hourly.windspeed_10m[idx] : null);
-            const pressure = (hourly.surface_pressure && hourly.surface_pressure[idx] != null) ? hourly.surface_pressure[idx] : null;
-
-            // Show in preferred units
-            let tempDisplay = tempC; let feelsDisplay = feelsC; let windDisplay = wind_kmh; let precipDisplay = precip; let windUnit = 'km/h'; let tempUnit = '°C';
+            // Extract all current weather variables
+            const tempC = hourly.temperature_2m?.[idx] ?? cw.temperature;
+            const feelsC = hourly.apparent_temperature?.[idx] ?? tempC;
+            const hum = hourly.relativehumidity_2m?.[idx] ?? null;
+            const precip_mm = hourly.precipitation?.[idx] ?? 0;
+            const clouds = hourly.cloudcover?.[idx] ?? null;
+            const wind_kmh = cw.windspeed ?? hourly.windspeed_10m?.[idx] ?? null;
+            const pressure = hourly.surface_pressure?.[idx] ?? null;
+            const uv = hourly.uv_index?.[idx] ?? null;
+            const visibility_m = hourly.visibility?.[idx] ?? null;
+            
+            // --- UPDATED: Display logic for new variables ---
+            let tempDisplay = tempC, feelsDisplay = feelsC, windDisplay = wind_kmh, precipDisplay = precip_mm, visDisplay, windUnit = 'km/h', tempUnit = '°C', visUnit = 'km';
             if (units === 'imperial') {
-                tempDisplay = Math.round(cToF(tempC)); feelsDisplay = Math.round(cToF(feelsC)); windDisplay = Math.round(mpsToMph(wind_kmh / 3.6)); precipDisplay = Math.round(precip * 0.0393701 * 100) / 100; // mm to inches
-                windUnit = 'mph'; tempUnit = '°F';
+                tempDisplay = Math.round(cToF(tempC)); feelsDisplay = Math.round(cToF(feelsC)); windDisplay = Math.round(mpsToMph(wind_kmh / 3.6)); precipDisplay = (precip_mm * 0.0393701).toFixed(2); visDisplay = mToMi(visibility_m).toFixed(1);
+                windUnit = 'mph'; tempUnit = '°F'; visUnit = 'mi';
             } else {
-                tempDisplay = Math.round(tempC); feelsDisplay = Math.round(feelsC); windDisplay = Math.round(wind_kmh); precipDisplay = Math.round(precip * 10) / 10; // mm
+                tempDisplay = Math.round(tempC); feelsDisplay = Math.round(feelsC); windDisplay = Math.round(wind_kmh); precipDisplay = precip_mm.toFixed(1); visDisplay = mToKm(visibility_m).toFixed(1);
             }
 
             $('temp').textContent = `${tempDisplay}${tempUnit}`;
             $('desc').textContent = mapWeatherCodeToText(cw.weathercode);
             $('loc').textContent = `Lat ${lat.toFixed(3)}, Lon ${lon.toFixed(3)}`;
             $('time').textContent = new Date().toLocaleString();
-
             $('wind').textContent = windDisplay + ' ' + windUnit;
             $('precip').textContent = (precipDisplay === null ? '--' : precipDisplay + (units === 'imperial' ? ' in' : ' mm'));
             $('hum').textContent = (hum === null ? '--' : hum + '%');
             $('clouds').textContent = (clouds === null ? '--' : clouds + '%');
             $('feels').textContent = `${feelsDisplay}${tempUnit}`;
             $('press').textContent = pressure ? (pressure.toFixed(0) + ' hPa') : '--';
+            $('uv').textContent = uv?.toFixed(1) ?? '--';
+            $('vis').textContent = visibility_m === null ? '--' : `${visDisplay} ${visUnit}`;
 
-            // Calculate playability score
+            // --- REVISED: More realistic playability score calculation ---
             const config = sportsConfig[selectedSport];
-            let score = 0;
-
-            // Temperature score (0 to 1)
+            
+            // Temperature score
             let tempScore = 0;
-            if (tempC < config.idealTemp[0]) tempScore = tempC / config.idealTemp[0];
-            else if (tempC > config.idealTemp[1]) tempScore = 1 - (tempC - config.idealTemp[1]) / (50 - config.idealTemp[1]);
+            if (tempC < config.idealTemp[0]) tempScore = Math.max(0, 1 - (config.idealTemp[0] - tempC) / 15);
+            else if (tempC > config.idealTemp[1]) tempScore = Math.max(0, 1 - (tempC - config.idealTemp[1]) / 15);
             else tempScore = 1;
-            tempScore = Math.min(Math.max(tempScore, 0), 1);
 
-            // Precipitation score (1 at 0mm, linearly to 0 at 2mm+)
-            let precipScore = precip > 2 ? 0 : 1 - precip / 2;
+            // Precipitation score (with check for hazardous weather types)
+            const badWeatherCodes = [56, 57, 66, 67, 75, 77, 85, 86, 96, 99]; // Freezing, heavy snow, hail
+            let precipScore = badWeatherCodes.includes(cw.weathercode) ? 0 : (precip_mm > 2 ? 0 : 1 - precip_mm / 2);
 
-            // Wind score (1 at 0km/h, down to 0 at 30km/h+)
-            let windScore = wind_kmh > 30 ? 0 : 1 - wind_kmh / 30;
-
-            // Humidity score (1 at 40-60%, down to 0 at 0 or 100%)
+            // Wind score
+            let windScore = wind_kmh > 35 ? 0 : 1 - wind_kmh / 35;
+            
+            // Humidity score
             let humScore = (hum >= 40 && hum <= 60) ? 1 : 1 - Math.min(Math.abs(hum - 50) / 50, 1);
-
-            // Clouds score (simple 1 at 0-30%, down to 0 at 100%)
+            
+            // Cloud score
             let cloudsScore = clouds > 100 ? 0 : 1 - clouds / 100;
 
-            score = (
-                config.weights.temp * tempScore +
-                config.weights.precip * precipScore +
-                config.weights.wind * windScore +
-                config.weights.humidity * humScore +
-                config.weights.clouds * cloudsScore
+            // UV score (1 is good, 0 is bad)
+            let uvScore = uv === null ? 0.5 : (uv < 3 ? 1 : (uv > 11 ? 0 : 1 - ((uv - 3) / 8)));
+
+            // Visibility score
+            const vis_km = mToKm(visibility_m);
+            let visibilityScore = visibility_m === null ? 0.5 : (vis_km > 10 ? 1 : (vis_km < 1 ? 0 : (vis_km - 1) / 9));
+
+            // Weighted sum of all scores
+            const score = (
+                (config.weights.temp * tempScore) +
+                (config.weights.precip * precipScore) +
+                (config.weights.wind * windScore) +
+                (config.weights.humidity * humScore) +
+                (config.weights.clouds * cloudsScore) +
+                (config.weights.uv * uvScore) +
+                (config.weights.visibility * visibilityScore)
             );
 
             let finalScore = Math.round(score * 100);
             scoreEl.textContent = `Score: ${finalScore}/100`;
 
-            // Set badge
-            if (finalScore >= 80) {
-                playBadge.textContent = "Good";
-                playBadge.style.backgroundColor = "#22c55e"; // green
-            } else if (finalScore >= 50) {
-                playBadge.textContent = "Fair";
-                playBadge.style.backgroundColor = "#eab308"; // yellow
-            } else {
-                playBadge.textContent = "Bad";
-                playBadge.style.backgroundColor = "#ef4444"; // red
-            }
+            if (finalScore >= 80) { playBadge.textContent = "Good"; playBadge.style.backgroundColor = "#22c55e"; }
+            else if (finalScore >= 50) { playBadge.textContent = "Fair"; playBadge.style.backgroundColor = "#eab308"; }
+            else { playBadge.textContent = "Bad"; playBadge.style.backgroundColor = "#ef4444"; }
 
-            reasonEl.innerHTML = generateReason(finalScore, tempC, precip, wind_kmh, hum, clouds, selectedSport);
+            reasonEl.innerHTML = generateReason(finalScore, tempC, precip_mm, wind_kmh, hum, clouds, uv, vis_km, selectedSport, cw.weathercode);
 
-            // Render multi-day forecast (next 3 days, midday hour for playability)
             renderForecast(data, config);
-
         }
 
         function mapWeatherCodeToText(code) {
-            // Simplified mapping from Open-Meteo weather codes to text
-            const map = {
-                0: 'Clear sky',
-                1: 'Mainly clear',
-                2: 'Partly cloudy',
-                3: 'Overcast',
-                45: 'Fog',
-                48: 'Depositing rime fog',
-                51: 'Light drizzle',
-                53: 'Moderate drizzle',
-                55: 'Dense drizzle',
-                56: 'Light freezing drizzle',
-                57: 'Dense freezing drizzle',
-                61: 'Slight rain',
-                63: 'Moderate rain',
-                65: 'Heavy rain',
-                66: 'Light freezing rain',
-                67: 'Heavy freezing rain',
-                71: 'Slight snow fall',
-                73: 'Moderate snow fall',
-                75: 'Heavy snow fall',
-                77: 'Snow grains',
-                80: 'Slight rain showers',
-                81: 'Moderate rain showers',
-                82: 'Violent rain showers',
-                85: 'Slight snow showers',
-                86: 'Heavy snow showers',
-                95: 'Thunderstorm',
-                96: 'Thunderstorm with slight hail',
-                99: 'Thunderstorm with heavy hail',
-            };
+            const map = { 0: 'Clear sky', 1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast', 45: 'Fog', 48: 'Depositing rime fog', 51: 'Light drizzle', 53: 'Moderate drizzle', 55: 'Dense drizzle', 56: 'Light freezing drizzle', 57: 'Dense freezing drizzle', 61: 'Slight rain', 63: 'Moderate rain', 65: 'Heavy rain', 66: 'Light freezing rain', 67: 'Heavy freezing rain', 71: 'Slight snow fall', 73: 'Moderate snow fall', 75: 'Heavy snow fall', 77: 'Snow grains', 80: 'Slight rain showers', 81: 'Moderate rain showers', 82: 'Violent rain showers', 85: 'Slight snow showers', 86: 'Heavy snow showers', 95: 'Thunderstorm', 96: 'Thunderstorm with slight hail', 99: 'Thunderstorm with heavy hail' };
             return map[code] || 'Unknown';
         }
 
-        // Generate explanation based on conditions
-        function generateReason(score, tempC, precip, wind, hum, clouds, sport) {
+        // --- UPDATED: Explanation generator includes new factors ---
+        function generateReason(score, tempC, precip, wind, hum, clouds, uv, vis_km, sport, code) {
             const reasons = [];
+            const badWeatherCodes = [56, 57, 66, 67, 75, 77, 85, 86, 96, 99];
             if (score >= 80) reasons.push("Weather is great for playing " + sport + ".");
             else if (score >= 50) reasons.push("Conditions are okay but watch for:");
             else reasons.push("Poor conditions due to:");
 
-            if (tempC < sportsConfig[sport].idealTemp[0]) reasons.push(`Temperature too low (${Math.round(tempC)}°C).`);
-            if (tempC > sportsConfig[sport].idealTemp[1]) reasons.push(`Temperature too high (${Math.round(tempC)}°C).`);
-            if (precip > 0.5) reasons.push(`Precipitation present (${precip.toFixed(2)} mm).`);
-            if (wind > 20) reasons.push(`Wind is strong (${Math.round(wind)} km/h).`);
-            if (hum < 30 || hum > 70) reasons.push(`Humidity out of ideal range (${hum}%).`);
-            if (clouds > 80) reasons.push(`Cloud cover is heavy (${clouds}%).`);
-
+            if (tempC < sportsConfig[sport].idealTemp[0]) reasons.push(`Low temperature (${Math.round(tempC)}°C).`);
+            if (tempC > sportsConfig[sport].idealTemp[1]) reasons.push(`High temperature (${Math.round(tempC)}°C).`);
+            if (badWeatherCodes.includes(code)) reasons.push(`Hazardous precipitation (${mapWeatherCodeToText(code).toLowerCase()}).`);
+            else if (precip > 0.5) reasons.push(`Precipitation (${precip.toFixed(1)} mm).`);
+            if (wind > 25) reasons.push(`Strong wind (${Math.round(wind)} km/h).`);
+            if (hum < 30 || hum > 75) reasons.push(`Uncomfortable humidity (${hum}%).`);
+            if (uv > 6) reasons.push(`High UV index (${uv.toFixed(1)}).`);
+            if (vis_km < 2) reasons.push(`Poor visibility (${vis_km.toFixed(1)} km).`);
+            
             return reasons.join(' ');
         }
-
-        // Render multi-day forecast for 3 days
+        
+        // --- UPDATED: Forecast includes new factors and units ---
         function renderForecast(data, config) {
             const hourly = data.hourly || {};
             const times = hourly.time || [];
-
-            if (!times.length) {
-                forecastContent.textContent = 'Forecast data not available.';
-                return;
-            }
-
-            // Group hourly data by day
+            if (!times.length) { forecastContent.textContent = 'Forecast data not available.'; return; }
             const dayGroups = {};
-
-            times.forEach((t, i) => {
-                const day = t.split('T')[0];
-                if (!dayGroups[day]) dayGroups[day] = [];
-                dayGroups[day].push(i);
-            });
-
-            // We want next 3 days including today, but only midday hours (12:00) for playability
-            const today = new Date().toISOString().split('T')[0];
-            const days = Object.keys(dayGroups).filter(d => d >= today).slice(0, 3);
-
+            times.forEach((t, i) => { const day = t.split('T')[0]; if (!dayGroups[day]) dayGroups[day] = []; dayGroups[day].push(i); });
+            const tomorrow = new Date();
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            const pad = n => String(n).padStart(2, '0');
+            const tomorrowStr = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}`;
+            const days = Object.keys(dayGroups).filter(d => d >= tomorrowStr).slice(0, 3);
+            if (days.length === 0) { forecastContent.innerHTML = 'Forecast for the next 3 days is not available.'; return; }
             let html = '';
             days.forEach(day => {
-                // Find 12:00 hour index or closest
-                let noonIndex = dayGroups[day].find(i => times[i].endsWith('12:00'));
-                if (noonIndex === undefined) noonIndex = dayGroups[day][Math.floor(dayGroups[day].length / 2)];
-
-                const tempC = hourly.temperature_2m[noonIndex];
-                const precip = hourly.precipitation[noonIndex];
-                const wind_kmh = hourly.windspeed_10m[noonIndex];
-                const hum = hourly.relativehumidity_2m[noonIndex];
-                const clouds = hourly.cloudcover[noonIndex];
-
-                // Playability calc same as main
-                let tempScore = 0;
-                if (tempC < config.idealTemp[0]) tempScore = tempC / config.idealTemp[0];
-                else if (tempC > config.idealTemp[1]) tempScore = 1 - (tempC - config.idealTemp[1]) / (50 - config.idealTemp[1]);
-                else tempScore = 1;
-                tempScore = Math.min(Math.max(tempScore, 0), 1);
-
-                let precipScore = precip > 2 ? 0 : 1 - precip / 2;
-                let windScore = wind_kmh > 30 ? 0 : 1 - wind_kmh / 30;
-                let humScore = (hum >= 40 && hum <= 60) ? 1 : 1 - Math.min(Math.abs(hum - 50) / 50, 1);
-                let cloudsScore = clouds > 100 ? 0 : 1 - clouds / 100;
-
-                let score = (
-                    config.weights.temp * tempScore +
-                    config.weights.precip * precipScore +
-                    config.weights.wind * windScore +
-                    config.weights.humidity * humScore +
-                    config.weights.clouds * cloudsScore
-                );
-
-                const finalScore = Math.round(score * 100);
-
-                // Format date nicely
-                const dateObj = new Date(day);
-                const dayStr = dateObj.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-
-                let badgeText = '';
-                let badgeColor = '';
-                if (finalScore >= 80) {
-                    badgeText = "Good";
-                    badgeColor = "#22c55e";
-                } else if (finalScore >= 50) {
-                    badgeText = "Fair";
-                    badgeColor = "#eab308";
+                const dayIndices = dayGroups[day];
+                if (!dayIndices || dayIndices.length === 0) return;
+                const dayTempsC = dayIndices.map(i => hourly.temperature_2m[i]);
+                const lowTempC = Math.min(...dayTempsC);
+                const highTempC = Math.max(...dayTempsC);
+                let noonIndex = dayIndices.find(i => times[i].endsWith('12:00')) ?? dayIndices[Math.floor(dayIndices.length / 2)];
+                const precip_mm = hourly.precipitation?.[noonIndex] ?? 0;
+                const wind_kmh = hourly.windspeed_10m?.[noonIndex] ?? 0;
+                const hum = hourly.relativehumidity_2m?.[noonIndex] ?? 0;
+                const uv = hourly.uv_index?.[noonIndex] ?? 0;
+                let lowTempDisplay, highTempDisplay, tempUnit, windDisplay, windUnit, precipDisplay, precipUnit;
+                if (units === 'imperial') {
+                    lowTempDisplay = Math.round(cToF(lowTempC)); highTempDisplay = Math.round(cToF(highTempC)); tempUnit = '°F';
+                    windDisplay = Math.round(mpsToMph(wind_kmh / 3.6)); windUnit = 'mph';
+                    precipDisplay = (precip_mm * 0.0393701).toFixed(2); precipUnit = 'in';
                 } else {
-                    badgeText = "Bad";
-                    badgeColor = "#ef4444";
+                    lowTempDisplay = Math.round(lowTempC); highTempDisplay = Math.round(highTempC); tempUnit = '°C';
+                    windDisplay = Math.round(wind_kmh); windUnit = 'km/h';
+                    precipDisplay = precip_mm.toFixed(1); precipUnit = 'mm';
                 }
-
-                html += `
-                    <div class="forecast-day">
-                        <strong>${dayStr}</strong> - Score: ${finalScore}/100 <span style="background-color:${badgeColor};color:#fff;padding:2px 6px;border-radius:12px;margin-left:8px;">${badgeText}</span>
-                        <div style="font-size:12px;color:#bbb;margin-top:4px;">
-                            Temp: ${Math.round(tempC)}°C, Precip: ${precip} mm, Wind: ${Math.round(wind_kmh)} km/h, Humidity: ${hum}%, Clouds: ${clouds}%
-                        </div>
-                    </div>
-                `;
+                const tempForScore = highTempC;
+                let tempScore = 0;
+                if (tempForScore < config.idealTemp[0]) tempScore = Math.max(0, 1 - (config.idealTemp[0] - tempForScore) / 15);
+                else if (tempForScore > config.idealTemp[1]) tempScore = Math.max(0, 1 - (tempForScore - tempForScore) / 15); else tempScore = 1;
+                let precipScore = precip_mm > 2 ? 0 : 1 - precip_mm / 2;
+                let windScore = wind_kmh > 35 ? 0 : 1 - wind_kmh / 35;
+                let humScore = (hum >= 40 && hum <= 60) ? 1 : 1 - Math.min(Math.abs(hum - 50) / 50, 1);
+                let uvScore = uv < 3 ? 1 : (uv > 11 ? 0 : 1 - ((uv - 3) / 8));
+                let score = ((config.weights.temp * tempScore) + (config.weights.precip * precipScore) + (config.weights.wind * windScore) + (config.weights.humidity * humScore) + (config.weights.uv * uvScore)) / (config.weights.temp + config.weights.precip + config.weights.wind + config.weights.humidity + config.weights.uv);
+                const finalScore = Math.round(score * 100);
+                const dateObj = new Date(day + 'T12:00:00');
+                const dayStr = dateObj.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+                let badgeText = ''; let badgeColor = '';
+                if (finalScore >= 80) { badgeText = "Good"; badgeColor = "#22c55e"; }
+                else if (finalScore >= 50) { badgeText = "Fair"; badgeColor = "#eab308"; }
+                else { badgeText = "Bad"; badgeColor = "#ef4444"; }
+                html += `<div class="forecast-day"><strong>${dayStr}</strong> - Score: ${finalScore}/100 <span style="background-color:${badgeColor};color:#fff;padding:2px 6px;border-radius:12px;margin-left:8px;">${badgeText}</span><div style="font-size:12px;color:#bbb;margin-top:4px;">Temp: ${highTempDisplay}/${lowTempDisplay}${tempUnit} &bull; Precip: ${precipDisplay} ${precipUnit} &bull; Wind: ${windDisplay} ${windUnit} &bull; UV: ${uv.toFixed(1)}</div></div>`;
             });
-
             forecastContent.innerHTML = html;
         }
 
         // Auto-refresh every 15 minutes
-        setInterval(() => {
-            if (lastData) {
-                fetchWeather(lastData.lat, lastData.lon);
-            }
-        }, 15 * 60 * 1000);
+        setInterval(() => { if (lastData) { fetchWeather(lastData.lat, lastData.lon); } }, 15 * 60 * 1000);
 
         // Export CSV function
         function exportCSV(payload) {
             const { data, lat, lon } = payload;
-            const cw = data.current_weather || {};
             const hourly = data.hourly || {};
             const times = hourly.time || [];
-
-            // Compose CSV header and data
-            const rows = [
-                ['DateTime', 'Temperature(°C)', 'Precipitation(mm)', 'Wind Speed(km/h)', 'Humidity(%)', 'Cloud Cover(%)']
-            ];
-
+            const rows = [['DateTime', 'Temperature(°C)', 'Precipitation(mm)', 'Wind Speed(km/h)', 'Humidity(%)', 'Cloud Cover(%)', 'UV Index', 'Visibility(m)']];
             for (let i = 0; i < times.length; i++) {
-                rows.push([
-                    times[i],
-                    hourly.temperature_2m[i],
-                    hourly.precipitation[i],
-                    hourly.windspeed_10m[i],
-                    hourly.relativehumidity_2m[i],
-                    hourly.cloudcover[i]
-                ]);
+                rows.push([times[i], hourly.temperature_2m[i], hourly.precipitation[i], hourly.windspeed_10m[i], hourly.relativehumidity_2m[i], hourly.cloudcover[i], hourly.uv_index[i], hourly.visibility[i]]);
             }
-
-            // Add summary line for current playability and location
             rows.push([]);
-            rows.push(['Location', `Lat: ${lat}`, `Lon: ${lon}`]);
-            rows.push(['Sport', selectedSport]);
+            rows.push(['Location', `Lat: ${lat.toFixed(4)}`, `Lon: ${lon.toFixed(4)}`]);
+            rows.push(['Selected Sport', selectedSport]);
             rows.push(['Current Playability Score', scoreEl.textContent.replace('Score: ', '')]);
-            rows.push(['Playability Rating', playBadge.textContent]);
-
-            // Convert to CSV string
+            rows.push(['Current Playability Rating', playBadge.textContent]);
             let csvContent = rows.map(r => r.join(',')).join('\n');
-
-            // Download file
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
             a.download = `sports-weather-report-${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(a);
             a.click();
+            document.body.removeChild(a);
             URL.revokeObjectURL(url);
         }
 
